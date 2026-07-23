@@ -150,11 +150,21 @@ export function removeListItem(previous: unknown, index: number): unknown[] {
   return asList(previous).filter((_, i) => i !== index)
 }
 
-/** Append empty item matching existing list shape (string vs `{ name }`). */
+/** Append empty item matching existing list shape (string vs object with same keys). */
 export function appendListItem(previous: unknown, label = ''): unknown[] {
   const next = asList(previous)
   if (listMode(previous) === 'object') {
-    next.push({ name: label })
+    const first = next.find((item) => item != null && typeof item === 'object' && !Array.isArray(item))
+    if (first != null && typeof first === 'object' && !Array.isArray(first)) {
+      const blank: Record<string, unknown> = {}
+      for (const key of Object.keys(first as Record<string, unknown>)) {
+        blank[key] = ''
+      }
+      blank.name = label
+      next.push(blank)
+    } else {
+      next.push({ name: label })
+    }
   } else {
     next.push(label)
   }

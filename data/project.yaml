@@ -2,7 +2,7 @@ meta:
   absent_sections: []
 system:
   name: Автоматизированная система управления примером
-  short_name: АСУ-ПРИМЕР
+  short_name: АСУ Вималис
   topic_code: Тема-001
 parties:
   customer: Организация-заказчик, ИНН …

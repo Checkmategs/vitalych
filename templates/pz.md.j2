@@ -26,8 +26,8 @@ _заполнить: {{ hint }}_
 
 | Документ | Номер | Дата | Утверждён |
 |----------|-------|------|-----------|
-{% for d in basis.documents %}
-| {{ d.name }} | {{ d.number }} | {{ d.date }} | {{ d.approved_by | default('—') }} |
+{% for d in basis.documents if d.name is defined and d.name | trim %}
+| {{ d.name }} | {{ d.number | default('—') }} | {{ d.date | default('—') }} | {{ d.approved_by | default('—') }} |
 {% endfor %}
 {% else %}
 _заполнить: наименования документов, номера и даты утверждения_
@@ -39,16 +39,16 @@ _заполнить: наименования документов, номера
 - **Разработчик:** {{ parties.developer }}
 {% if parties.participants %}
 - **Участники:**
-{% for p in parties.participants %}
-  - {{ p.name }} — {{ p.role }}
+{% for p in parties.participants if p.name is defined and p.name | trim %}
+  - {{ p.name }} — {{ p.role | default('—') }}
 {% endfor %}
 {% endif %}
 
 - **Общий срок работ:** {{ schedule.start }} — {{ schedule.end }}
 {% if schedule.stages %}
 - **Стадии:**
-{% for s in schedule.stages %}
-  - {{ s.name }}: {{ s.start }} — {{ s.end }}
+{% for s in schedule.stages if s.name is defined and s.name | trim %}
+  - {{ s.name }}: {{ s.start | default('—') }} — {{ s.end | default('—') }}
 {% endfor %}
 {% endif %}
 
@@ -57,8 +57,8 @@ _заполнить: наименования документов, номера
 - **Назначение:** {{ fill(goals.purpose, 'назначение и области использования АС') }}
 {% if goals.objectives %}
 - **Цели:**
-{% for o in goals.objectives %}
-  - {{ o.name }} ({{ o.target_value }}; критерий: {{ o.criterion }})
+{% for o in goals.objectives if o.name is defined and o.name | trim %}
+  - {{ o.name }} ({{ o.target_value | default('—') }}; критерий: {{ o.criterion | default('—') }})
 {% endfor %}
 {% endif %}
 
@@ -114,8 +114,8 @@ _заполнить: наименования документов, номера
 ### 3.4. Состав функций, комплексов задач
 
 {% if requirements.functions %}
-{% for f in requirements.functions %}
-- **{{ f.name }}** — {{ f.result }}
+{% for f in requirements.functions if f.name is defined and f.name | trim %}
+- **{{ f.name }}** — {{ f.result | default('—') }}
 {% endfor %}
 {% else %}
 _заполнить: состав функций, комплексов задач (задач)_

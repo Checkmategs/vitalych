@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
+from jinja2 import TemplateNotFound, UndefinedError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
@@ -145,5 +146,5 @@ def render(body: RenderBody = RenderBody()) -> dict[str, list[str]]:
         return {"written": [str(p.relative_to(ROOT)) for p in written]}
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except (ValueError, yaml.YAMLError, OSError) as e:
+    except (ValueError, yaml.YAMLError, OSError, UndefinedError, TemplateNotFound) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
