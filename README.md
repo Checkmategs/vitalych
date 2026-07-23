@@ -52,7 +52,7 @@ python -m unittest tests.test_render_smoke -v
 # Терминал 1 — API
 source .venv/bin/activate
 pip install -r requirements.txt
-uvicorn api.main:app --reload --port 8000
+uvicorn api.main:app --reload --port 8010
 
 # Терминал 2 — UI
 cd web && npm install && npm run dev
