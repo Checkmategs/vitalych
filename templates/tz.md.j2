@@ -1,0 +1,235 @@
+{# Техническое задание на создание АС — ГОСТ 34.602-2020 #}
+{# Единый контекст: project.yaml (StrictUndefined на этапе B) #}
+{% macro fill(value, hint) -%}
+{% if value is defined and value is string and value|trim -%}
+{{ value }}
+{%- elif value is defined and value is sequence and value -%}
+{% for item in value -%}
+- {{ item }}
+{% endfor -%}
+{%- else -%}
+_заполнить: {{ hint }}_
+{%- endif %}
+{%- endmacro %}
+
+# Техническое задание на создание автоматизированной системы
+
+**{{ system.name }}** ({{ system.short_name }})
+
+---
+
+## 1. Общие сведения
+
+- **Полное наименование АС:** {{ system.name }}
+- **Условное обозначение:** {{ system.short_name }}
+- **Шифр темы:** {{ system.topic_code | default('_заполнить: шифр темы (при наличии)_') }}
+- **Заказчик:** {{ parties.customer }}
+- **Разработчик:** {{ parties.developer }}
+{% if parties.participants %}
+- **Участники разработки:**
+{% for p in parties.participants %}
+  - {{ p.name }} — {{ p.role }}
+{% endfor %}
+{% endif %}
+
+### Документы-основания
+
+{% if basis.documents %}
+| Документ | Номер | Дата | Утверждён |
+|----------|-------|------|-----------|
+{% for d in basis.documents %}
+| {{ d.name }} | {{ d.number }} | {{ d.date }} | {{ d.approved_by | default('—') }} |
+{% endfor %}
+{% else %}
+_заполнить: перечень документов, на основании которых создаётся АС_
+{% endif %}
+
+- **Плановые сроки:** {{ schedule.start }} — {{ schedule.end }}
+{% if schedule.stages %}
+- **Стадии:**
+{% for s in schedule.stages %}
+  - {{ s.name }}: {{ s.start }} — {{ s.end }}
+{% endfor %}
+{% endif %}
+
+### Финансирование
+
+{% if 'funding' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+{{ fill(funding, 'сведения об источниках и порядке финансирования') }}
+{% endif %}
+
+---
+
+## 2. Цели и назначение создания автоматизированной системы
+
+### 2.1. Цели создания АС
+
+{% if goals.objectives %}
+{% for o in goals.objectives %}
+- **{{ o.name }}** — целевое значение: {{ o.target_value }}; критерий: {{ o.criterion }}
+{% endfor %}
+{% else %}
+_заполнить: наименования и значения показателей; критерии оценки достижения целей_
+{% endif %}
+
+### 2.2. Назначение АС
+
+{{ fill(goals.purpose, 'вид автоматизируемой деятельности применительно к объекту') }}
+
+---
+
+## 3. Характеристика объектов автоматизации
+
+- **Основные сведения:** {{ fill(object.description, 'идентификация объекта и масштаб разработки') }}
+- **Условия эксплуатации / среда:** {{ fill(object.environment, 'условия эксплуатации и характеристики окружающей среды') }}
+
+---
+
+## 4. Требования к автоматизированной системе
+
+{% if 'requirements' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+
+### 4.1. Требования к структуре АС в целом
+
+{{ fill(requirements.structure, 'подсистемы, обмен, смежные АС, режимы, диагностирование, развитие') }}
+
+### 4.2. Требования к функциям (задачам), выполняемым АС
+
+{% if requirements.functions %}
+{% for f in requirements.functions %}
+- **{{ f.name }}** — результат: {{ f.result }}
+{% endfor %}
+{% else %}
+_заполнить: перечень функций (задач) и результаты их выполнения_
+{% endif %}
+
+### 4.3. Требования к видам обеспечения АС
+
+| Вид обеспечения | Требования |
+|-----------------|------------|
+| Математическое | {{ requirements.support.mathematical | default('_заполнить / нет требований_') or '_нет требований_' }} |
+| Информационное | {{ requirements.support.information | default('_заполнить_') }} |
+| Лингвистическое | {{ requirements.support.linguistic | default('_заполнить / нет требований_') or '_нет требований_' }} |
+| Программное | {{ requirements.support.software | default('_заполнить_') }} |
+| Техническое | {{ requirements.support.technical | default('_заполнить_') }} |
+| Метрологическое | {{ requirements.support.metrological | default('_заполнить / нет требований_') or '_нет требований_' }} |
+| Организационное | {{ requirements.support.organizational | default('_заполнить_') }} |
+| Методическое | {{ requirements.support.methodological | default('_заполнить / нет требований_') or '_нет требований_' }} |
+| Прочие | {{ requirements.support.other | default('_нет_') or '_нет_' }} |
+
+### 4.4. Общие технические требования к АС
+
+- **Персонал / пользователи:** {{ fill(requirements.general.personnel, 'численность и квалификация') }}
+- **Показатели назначения:** {{ fill(requirements.general.purpose_metrics, 'показатели назначения') }}
+- **Надёжность:** {{ fill(requirements.general.reliability, 'требования к надёжности') }}
+- **Безопасность:** {{ fill(requirements.general.safety, 'требования к безопасности') }}
+- **Эргономика и техническая эстетика:** {{ fill(requirements.general.ergonomics, 'при необходимости') }}
+- **Транспортабельность:** {{ fill(requirements.general.transportability, 'для подвижных АС / нет') }}
+- **Эксплуатация, ТО, ремонт, хранение:** {{ fill(requirements.general.operation, 'требования к эксплуатации') }}
+- **Защита от НСД:** {{ fill(requirements.general.unauthorized_access, 'защита от НСД') }}
+- **Сохранность информации при авариях:** {{ fill(requirements.general.information_safety, 'сохранность информации') }}
+- **Защита от внешних воздействий:** {{ fill(requirements.general.external_effects, 'при необходимости') }}
+- **Патентная чистота:** {{ fill(requirements.general.patent, 'при необходимости') }}
+- **Стандартизация и унификация:** {{ fill(requirements.general.standardization, 'требования') }}
+- **Дополнительные требования:** {{ fill(requirements.general.additional, 'при наличии') }}
+
+{% endif %}
+
+---
+
+## 5. Состав и содержание работ по созданию автоматизированной системы
+
+{% if 'works' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+{% if works.stages %}
+{% for w in works.stages %}
+### {{ w.name }}
+
+- **Содержание:** {{ w.content }}
+- **Срок:** {{ w.due | default('—') }}
+{% endfor %}
+{% else %}
+_заполнить: перечень этапов (стадий) создания АС и сроки_
+{% endif %}
+{% endif %}
+
+---
+
+## 6. Порядок разработки автоматизированной системы
+
+{% if 'development' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+- **Организация работ:** {{ fill(development.organization, 'организация разработки') }}
+- **Исходные данные по этапам:** {{ fill(development.inputs_by_stage, 'исходные данные и документы') }}
+- **Экспертиза:** {{ fill(development.expertise, 'при необходимости') }}
+- **Макеты / прототипы:** {{ fill(development.prototypes, 'при необходимости') }}
+- **План совместных работ:** {{ fill(development.joint_plan, 'при необходимости') }}
+- **Программа стандартизации:** {{ fill(development.standardization_program, 'при необходимости') }}
+- **Гарантии:** {{ fill(development.warranties, 'при необходимости') }}
+- **Оценка по ТЭО:** {{ fill(development.feasibility, 'при необходимости') }}
+- **Специальные программы (метрология, надёжность, эргономика):** {{ fill(development.special_programs, 'при необходимости') }}
+{% endif %}
+
+---
+
+## 7. Порядок контроля и приёмки автоматизированной системы
+
+{% if 'acceptance' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+- **Испытания:** {{ fill(acceptance.tests, 'виды, состав и методы испытаний') }}
+- **Приёмка:** {{ fill(acceptance.acceptance, 'порядок приёмки и приёмочная документация') }}
+- **Приёмочная комиссия:** {{ fill(acceptance.commission, 'статус комиссии при необходимости') }}
+{% endif %}
+
+---
+
+## 8. Требования к составу и содержанию работ по подготовке объекта автоматизации к вводу автоматизированной системы в действие
+
+{% if 'prep' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+- **Информация:** {{ fill(prep.information, 'приведение информации к виду для СВТ') }}
+- **Обучение персонала:** {{ fill(prep.training, 'обучение и проверка квалификации') }}
+- **Оргштатные меры:** {{ fill(prep.org_staff, 'подразделения и рабочие места') }}
+- **Изменение объекта:** {{ fill(prep.object_changes, 'мероприятия по изменению объекта') }}
+- **Прочее:** {{ fill(prep.other, 'иные мероприятия по специфике АС') }}
+{% endif %}
+
+---
+
+## 9. Требования к документированию
+
+{% if 'docs' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+- **Перечень документов:** {{ fill(docs.list, 'перечень, вид и количество') }}
+- **Стандарты оформления:** {{ fill(docs.standards, 'ЕСКД / ЕСПД и др.') }}
+- **Дополнительно:** {{ fill(docs.additional, 'при отсутствии госстандартов — доп. требования') }}
+{% endif %}
+
+---
+
+## 10. Источники разработки
+
+{% if 'sources' in (meta.absent_sections | default([])) %}
+Требования отсутствуют.
+{% else %}
+{% if sources.entries %}
+{% for s in sources.entries %}
+- {{ s }}
+{% endfor %}
+{% else %}
+_заполнить: ТЭО, отчёты НИР, аналоги и иные источники_
+{% endif %}
+{% endif %}
+
+---
+
+*Документ сформирован по структуре ГОСТ 34.602-2020. Приложения — по необходимости.*

@@ -1,0 +1,128 @@
+key: primer
+name: "Профиль по документу «Пример»"
+version: 1
+description: "Нормализованный профиль оформления, извлеченный из Пример.docx."
+
+source:
+  file_name: "Пример.docx"
+  sha256: "02fced5407666ebaf419462bdda903476feed31ae6e6d9e6206397016064cff6"
+  pages_inspected: 4
+  sections_inspected: 1
+  extraction_rule: "Использовать фактическое видимое оформление, а не конфликтующие скрытые значения стиля Normal."
+
+page:
+  format: A4
+  orientation: portrait
+  width_cm: 21.001
+  height_cm: 29.700
+  margins_cm:
+    top: 1.000
+    right: 1.000
+    bottom: 1.199
+    left: 2.000
+  header_distance_cm: 1.251
+  footer_distance_cm: 1.251
+
+body:
+  font_family: "Times New Roman"
+  font_size_pt: 12
+  color: "#000000"
+  alignment: justify
+  left_indent_cm: 0.501
+  right_indent_cm: 0.501
+  first_line_indent_cm: 1.251
+  line_spacing: 1.0
+  space_before_pt: 6
+  space_after_pt: 0
+
+headings:
+  numbering: decimal_multilevel
+  levels:
+    1:
+      pattern: "%1."
+      font_family: "Times New Roman"
+      font_size_pt: 12
+      bold: true
+      alignment: left
+      space_before_pt: 0
+      space_after_pt: 12
+      page_break_before: true
+      keep_with_next: true
+    2:
+      pattern: "%1.%2"
+      font_family: "Times New Roman"
+      font_size_pt: 12
+      bold: true
+      alignment: left
+      space_before_pt: 6
+      space_after_pt: 6
+      keep_with_next: true
+    3:
+      pattern: "%1.%2.%3"
+      font_family: "Times New Roman"
+      font_size_pt: 12
+      bold: true
+      alignment: left
+      space_before_pt: 6
+      space_after_pt: 6
+      keep_with_next: true
+    4:
+      pattern: "%1.%2.%3.%4"
+      font_family: "Times New Roman"
+      font_size_pt: 12
+      bold: true
+      alignment: left
+      space_before_pt: 6
+      space_after_pt: 6
+      keep_with_next: true
+    5:
+      pattern: "%1.%2.%3.%4.%5"
+      font_family: "Times New Roman"
+      font_size_pt: 13
+      bold: true
+      alignment: left
+      space_before_pt: 6
+      space_after_pt: 6
+      keep_with_next: true
+
+lists:
+  font_family: "Times New Roman"
+  font_size_pt: 12
+  line_spacing: 1.0
+  space_before_pt: 6
+  space_after_pt: 0
+  left_indent_cm: 2.521
+  hanging_indent_cm: 0.635
+  bullet_marker: "-"
+  ordered_marker: "%1."
+
+tables:
+  font_family: "Times New Roman"
+  font_size_pt: 12
+  border_color: "#000000"
+  border_width_pt: 0.5
+  header_bold: true
+  header_alignment: center
+  cell_alignment: left
+  preferred_column_widths_cm: [5.493, 11.501]
+
+captions:
+  font_family: "Times New Roman"
+  font_size_pt: 12
+  italic: true
+  alignment: right
+  placement: above
+
+footer:
+  page_number:
+    enabled: true
+    field: PAGE
+    alignment: right
+    font_family: "Times New Roman"
+    font_size_pt: 12
+  different_even_and_odd: true
+
+artifacts:
+  reference_docx: reference.docx
+  browser_preview_css: preview.css
+  docx_postprocessor: postprocess_docx.py
