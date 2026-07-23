@@ -44,7 +44,33 @@ python -m src.render --data data/project.yaml --out out/
 python -m unittest tests.test_render_smoke -v
 ```
 
-## UI заполнения переменных
+## React-редактор (центр + боковые панели)
+
+Трёхпанельный UI: оглавление ТЗ/ПЗ | Markdown-шаблон с immutable-чипами `{{ }}` | панель переменных.
+
+```bash
+# Терминал 1 — API
+source .venv/bin/activate
+pip install -r requirements.txt
+uvicorn api.main:app --reload --port 8000
+
+# Терминал 2 — UI
+cd web && npm install && npm run dev
+```
+
+Откройте http://localhost:5173. Кнопка «Сгенерировать» сохраняет проект и шаблон, затем пишет `out/`.
+
+### Откат к Streamlit MVP
+
+Тег **`streamlit-mvp`** — чекпоинт до React UI:
+
+```bash
+git checkout streamlit-mvp
+# или новая ветка от тега:
+git switch -c restore-streamlit streamlit-mvp
+```
+
+## UI заполнения переменных (Streamlit, fallback)
 
 ```bash
 source .venv/bin/activate
