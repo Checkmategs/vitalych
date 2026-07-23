@@ -1,11 +1,13 @@
-import { useMemo, useState, type ReactNode } from 'react'
+import { useState, type ReactNode } from 'react'
 import {
   LIST_FIELDS,
   TEXT_FIELDS,
+  appendListItem,
   getByPath,
   listToStrings,
+  removeListItem,
   setByPath,
-  stringsToList,
+  updateListItemLabel,
   type FieldDef,
 } from '../schema/fields'
 
@@ -78,14 +80,15 @@ function TextFieldCard({
 
 function ListFieldCard({
   field,
-  items,
-  onChange,
+  rawList,
+  onChangeRaw,
 }: {
   field: FieldDef
-  items: string[]
-  onChange: (items: string[]) => void
+  rawList: unknown
+  onChangeRaw: (next: unknown[]) => void
 }) {
   const [editing, setEditing] = useState(false)
+  const items = listToStrings(rawList)
   const preview = items.slice(0, 3)
   const rest = Math.max(0, items.length - preview.length)
 
@@ -128,23 +131,23 @@ function ListFieldCard({
                 className="var-input"
                 type="text"
                 value={item}
-                onChange={(e) => {
-                  const next = [...items]
-                  next[i] = e.target.value
-                  onChange(next)
-                }}
+                onChange={(e) => onChangeRaw(updateListItemLabel(rawList, i, e.target.value))}
               />
               <button
                 type="button"
                 className="btn-icon"
                 title="Удалить"
-                onClick={() => onChange(items.filter((_, j) => j !== i))}
+                onClick={() => onChangeRaw(removeListItem(rawList, i))}
               >
                 ×
               </button>
             </div>
           ))}
-          <button type="button" className="btn-link" onClick={() => onChange([...items, ''])}>
+          <button
+            type="button"
+            className="btn-link"
+            onClick={() => onChangeRaw(appendListItem(rawList))}
+          >
             + Добавить
           </button>
         </div>
@@ -160,14 +163,6 @@ export function VariablesPanel({ data, onChange }: Props) {
   const setField = (field: FieldDef, value: unknown) => {
     onChange(setByPath(data, field.path, value) as Record<string, unknown>)
   }
-
-  const listValues = useMemo(
-    () =>
-      Object.fromEntries(
-        listFields.map((f) => [f.slug, listToStrings(getByPath(data, f.path))]),
-      ) as Record<string, string[]>,
-    [data, listFields],
-  )
 
   return (
     <aside className="variables-panel">
@@ -196,11 +191,8 @@ export function VariablesPanel({ data, onChange }: Props) {
               <ListFieldCard
                 key={field.slug}
                 field={field}
-                items={listValues[field.slug] ?? []}
-                onChange={(strings) => {
-                  const prev = getByPath(data, field.path)
-                  setField(field, stringsToList(strings, prev))
-                }}
+                rawList={getByPath(data, field.path)}
+                onChangeRaw={(next) => setField(field, next)}
               />
             ))}
           </Accordion>

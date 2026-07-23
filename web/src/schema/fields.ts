@@ -120,22 +120,43 @@ export function listToStrings(value: unknown): string[] {
   })
 }
 
-/**
- * Map edited string[] back onto the previous list value.
- * For object arrays, update `name` and preserve other keys when possible.
- */
-export function stringsToList(strings: string[], previous: unknown): unknown[] {
+function listMode(previous: unknown): 'string' | 'object' {
   const prev = Array.isArray(previous) ? previous : []
-  return strings.map((s, i) => {
-    const old = prev[i]
-    if (old != null && typeof old === 'object' && !Array.isArray(old)) {
-      return { ...(old as Record<string, unknown>), name: s }
-    }
-    if (typeof old === 'string' || old === undefined) {
-      // Prefer plain strings when previous was strings or empty
-      if (prev.length === 0 || typeof prev[0] === 'string') return s
-      return { name: s }
-    }
-    return s
-  })
+  if (prev.length === 0) return 'string'
+  const first = prev[0]
+  if (first != null && typeof first === 'object' && !Array.isArray(first)) return 'object'
+  return 'string'
+}
+
+function asList(previous: unknown): unknown[] {
+  return Array.isArray(previous) ? [...previous] : []
+}
+
+/** Update display label at index; preserves sibling keys on object items. */
+export function updateListItemLabel(previous: unknown, index: number, label: string): unknown[] {
+  const next = asList(previous)
+  if (index < 0 || index >= next.length) return next
+  const old = next[index]
+  if (old != null && typeof old === 'object' && !Array.isArray(old)) {
+    next[index] = { ...(old as Record<string, unknown>), name: label }
+  } else {
+    next[index] = label
+  }
+  return next
+}
+
+/** Remove item at index — keeps remaining objects intact (no index remapping). */
+export function removeListItem(previous: unknown, index: number): unknown[] {
+  return asList(previous).filter((_, i) => i !== index)
+}
+
+/** Append empty item matching existing list shape (string vs `{ name }`). */
+export function appendListItem(previous: unknown, label = ''): unknown[] {
+  const next = asList(previous)
+  if (listMode(previous) === 'object') {
+    next.push({ name: label })
+  } else {
+    next.push(label)
+  }
+  return next
 }
