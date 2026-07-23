@@ -85,15 +85,17 @@ streamlit run ui/app.py --server.headless false
 Один процесс FastAPI отдаёт API и собранный UI (`web/dist`) на порту **8080**.
 
 ```bash
-# Сборка фронта + rsync + systemd на сервере
+# Сборка фронта + rsync + запуск на сервере (по умолчанию nineone@10.91.0.142)
 chmod +x scripts/deploy.sh
-./scripts/deploy.sh USER@10.91.0.142
+./scripts/deploy.sh
+# или явно:
+./scripts/deploy.sh nineone@10.91.0.142
 ```
 
 После деплоя: http://10.91.0.142:8080/  
 Health: http://10.91.0.142:8080/api/health
 
-На сервере:
+На сервере (если есть systemd + sudo):
 
 ```bash
 sudo systemctl status vitalych
