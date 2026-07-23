@@ -87,6 +87,141 @@ export const FIELD_DEFS: FieldDef[] = [
 export const TEXT_FIELDS = FIELD_DEFS.filter((f) => f.kind === 'text' || f.kind === 'textarea')
 export const LIST_FIELDS = FIELD_DEFS.filter((f) => f.kind === 'list')
 
+export const SLUG_PATTERN = /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/
+
+const UI_KEY = '_ui'
+const CUSTOM_FIELDS_KEY = 'custom_fields'
+
+export function pathFromSlug(slug: string): string[] {
+  return slug.split('.').filter(Boolean)
+}
+
+export function isValidSlug(slug: string): boolean {
+  return SLUG_PATTERN.test(slug)
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  if (value != null && typeof value === 'object' && !Array.isArray(value)) {
+    return value as Record<string, unknown>
+  }
+  return null
+}
+
+function parseFieldDef(raw: unknown): FieldDef | null {
+  const obj = asRecord(raw)
+  if (!obj) return null
+  const slug = typeof obj.slug === 'string' ? obj.slug.trim() : ''
+  const label = typeof obj.label === 'string' ? obj.label.trim() : ''
+  const kind = obj.kind
+  if (!slug || !label) return null
+  if (kind !== 'text' && kind !== 'textarea' && kind !== 'list') return null
+  const path =
+    Array.isArray(obj.path) && obj.path.every((p) => typeof p === 'string') && obj.path.length > 0
+      ? (obj.path as string[])
+      : pathFromSlug(slug)
+  if (path.length === 0) return null
+  return { slug, label, path, kind }
+}
+
+/** Custom field defs persisted under `_ui.custom_fields` in project.yaml. */
+export function readCustomFields(data: Record<string, unknown>): FieldDef[] {
+  const ui = asRecord(data[UI_KEY])
+  if (!ui) return []
+  const list = ui[CUSTOM_FIELDS_KEY]
+  if (!Array.isArray(list)) return []
+  const seen = new Set<string>()
+  const result: FieldDef[] = []
+  for (const item of list) {
+    const def = parseFieldDef(item)
+    if (!def || seen.has(def.slug)) continue
+    seen.add(def.slug)
+    result.push(def)
+  }
+  return result
+}
+
+/** Builtin + custom fields; builtin wins on slug collision. */
+export function allFields(data: Record<string, unknown>): FieldDef[] {
+  const builtinSlugs = new Set(FIELD_DEFS.map((f) => f.slug))
+  const custom = readCustomFields(data).filter((f) => !builtinSlugs.has(f.slug))
+  return [...FIELD_DEFS, ...custom]
+}
+
+export function textFieldsOf(data: Record<string, unknown>): FieldDef[] {
+  return allFields(data).filter((f) => f.kind === 'text' || f.kind === 'textarea')
+}
+
+export function listFieldsOf(data: Record<string, unknown>): FieldDef[] {
+  return allFields(data).filter((f) => f.kind === 'list')
+}
+
+export function isCustomField(data: Record<string, unknown>, slug: string): boolean {
+  return readCustomFields(data).some((f) => f.slug === slug)
+}
+
+export function findField(data: Record<string, unknown>, slug: string): FieldDef | undefined {
+  return allFields(data).find((f) => f.slug === slug)
+}
+
+export type FieldCreateError = 'slug' | 'label' | 'duplicate' | null
+
+export function validateNewField(
+  data: Record<string, unknown>,
+  draft: { slug: string; label: string; kind: FieldDef['kind'] },
+): FieldCreateError {
+  const slug = draft.slug.trim()
+  const label = draft.label.trim()
+  if (!label) return 'label'
+  if (!isValidSlug(slug)) return 'slug'
+  if (allFields(data).some((f) => f.slug === slug)) return 'duplicate'
+  return null
+}
+
+/** Append custom field def and initial value; returns updated project data. */
+export function createCustomField(
+  data: Record<string, unknown>,
+  draft: { slug: string; label: string; kind: FieldDef['kind'] },
+  initialValue?: unknown,
+): { data: Record<string, unknown>; field: FieldDef } {
+  const slug = draft.slug.trim()
+  const label = draft.label.trim()
+  const path = pathFromSlug(slug)
+  const field: FieldDef = { slug, label, path, kind: draft.kind }
+  const existing = readCustomFields(data)
+  const nextCustom = [...existing.filter((f) => f.slug !== slug), field]
+  const ui = { ...(asRecord(data[UI_KEY]) ?? {}), [CUSTOM_FIELDS_KEY]: nextCustom }
+  let next = { ...data, [UI_KEY]: ui } as Record<string, unknown>
+  const value =
+    initialValue !== undefined
+      ? initialValue
+      : draft.kind === 'list'
+        ? []
+        : ''
+  next = setByPath(next, path, value) as Record<string, unknown>
+  return { data: next, field }
+}
+
+/** Update label of an existing custom field (slug/path immutable). */
+export function updateCustomFieldLabel(
+  data: Record<string, unknown>,
+  slug: string,
+  label: string,
+): Record<string, unknown> {
+  const trimmed = label.trim()
+  if (!trimmed) return data
+  const custom = readCustomFields(data)
+  const idx = custom.findIndex((f) => f.slug === slug)
+  if (idx < 0) return data
+  const nextCustom = [...custom]
+  nextCustom[idx] = { ...nextCustom[idx], label: trimmed }
+  const ui = { ...(asRecord(data[UI_KEY]) ?? {}), [CUSTOM_FIELDS_KEY]: nextCustom }
+  return { ...data, [UI_KEY]: ui }
+}
+
+export function jinjaForSlug(slug: string): string {
+  return `{{ ${slug} }}`
+}
+
 export function getByPath(obj: unknown, path: string[]): unknown {
   let cur: unknown = obj
   for (const key of path) {

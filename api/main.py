@@ -10,6 +10,8 @@ import yaml
 from jinja2 import TemplateNotFound, UndefinedError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
+from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +26,7 @@ EXAMPLE_YAML = DATA_DIR / "project.example.yaml"
 TEMPLATES_DIR = ROOT / "templates"
 OUT_DIR = ROOT / "out"
 STYLE_PROFILE = ROOT / "style-profile.yaml"
+DIST_DIR = ROOT / "web" / "dist"
 
 TemplateKey = Literal["tz", "pz"]
 RenderTemplate = Literal["tz", "pz", "all"]
@@ -46,7 +49,13 @@ class RenderBody(BaseModel):
 app = FastAPI(title="Vitalych API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5173"],
+    allow_origins=[
+        "http://localhost:5173",
+        "http://127.0.0.1:5173",
+        "http://localhost:8080",
+        "http://127.0.0.1:8080",
+        "http://10.91.0.142:8080",
+    ],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -148,3 +157,35 @@ def render(body: RenderBody = RenderBody()) -> dict[str, list[str]]:
         raise HTTPException(status_code=404, detail=str(e)) from e
     except (ValueError, yaml.YAMLError, OSError, UndefinedError, TemplateNotFound) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+
+
+def _mount_frontend() -> None:
+    """Serve Vite build from web/dist when present (production / LAN deploy)."""
+    if not DIST_DIR.is_dir():
+        return
+
+    assets_dir = DIST_DIR / "assets"
+    if assets_dir.is_dir():
+        app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
+
+    @app.get("/")
+    async def spa_index() -> FileResponse:
+        index = DIST_DIR / "index.html"
+        if not index.is_file():
+            raise HTTPException(status_code=404, detail="Frontend not built (web/dist missing)")
+        return FileResponse(index)
+
+    @app.get("/{full_path:path}")
+    async def spa_fallback(full_path: str) -> FileResponse:
+        if full_path.startswith("api/"):
+            raise HTTPException(status_code=404, detail="Not found")
+        candidate = DIST_DIR / full_path
+        if candidate.is_file():
+            return FileResponse(candidate)
+        index = DIST_DIR / "index.html"
+        if index.is_file():
+            return FileResponse(index)
+        raise HTTPException(status_code=404, detail="Frontend not built (web/dist missing)")
+
+
+_mount_frontend()

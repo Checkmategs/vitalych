@@ -79,3 +79,23 @@ streamlit run ui/app.py --server.headless false
 ```
 
 Откроется браузер (обычно http://localhost:8501). В UI можно править секции YAML, сохранить в `data/project.yaml` и сгенерировать ТЗ/ПЗ в `out/` (`.md` и `.docx`).
+
+## Production (LAN: 10.91.0.142)
+
+Один процесс FastAPI отдаёт API и собранный UI (`web/dist`) на порту **8080**.
+
+```bash
+# Сборка фронта + rsync + systemd на сервере
+chmod +x scripts/deploy.sh
+./scripts/deploy.sh USER@10.91.0.142
+```
+
+После деплоя: http://10.91.0.142:8080/  
+Health: http://10.91.0.142:8080/api/health
+
+На сервере:
+
+```bash
+sudo systemctl status vitalych
+sudo systemctl restart vitalych
+```
