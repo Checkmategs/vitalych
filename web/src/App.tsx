@@ -3,11 +3,13 @@ import { StructureTree } from './components/StructureTree'
 import { TemplateEditor } from './components/TemplateEditor'
 import { VariablesPanel } from './components/VariablesPanel'
 import {
+  fetchDocxBlob,
   getProject,
   getTemplate,
   putProject,
   putTemplate,
   render,
+  saveDocxAs,
   type ProjectData,
   type TemplateKey,
 } from './api/client'
@@ -84,8 +86,28 @@ export default function App() {
       setProject(savedProj)
       const savedTpl = await putTemplate(doc, template)
       setTemplate(savedTpl.content)
+      // On server we still write both; browser offers Save As only for .docx
       const result = await render(doc, 'both')
-      setStatus(`Готово: ${result.written.join(', ')}`)
+      const docxPaths = result.written.filter((p) => p.endsWith('.docx'))
+      if (docxPaths.length === 0) {
+        setStatus('Сгенерировано, но .docx не найден')
+        return
+      }
+      setStatus('Выберите, куда сохранить .docx…')
+      const outcomes: string[] = []
+      for (const path of docxPaths) {
+        const name = path.split('/').pop() ?? path
+        const blob = await fetchDocxBlob(name)
+        const outcome = await saveDocxAs(blob, name)
+        if (outcome === 'cancelled') {
+          outcomes.push(`${name}: отменено`)
+        } else if (outcome === 'saved') {
+          outcomes.push(`${name}: сохранено`)
+        } else {
+          outcomes.push(`${name}: скачано`)
+        }
+      }
+      setStatus(`Готово — ${outcomes.join('; ')}`)
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e))
     }

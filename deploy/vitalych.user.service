@@ -1,0 +1,15 @@
+[Unit]
+Description=Vitalych GOST document generator (API + UI)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=%h/vitalych
+ExecStart=%h/vitalych/.venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 8080
+Restart=on-failure
+RestartSec=5
+Environment=PYTHONUNBUFFERED=1
+
+[Install]
+WantedBy=default.target

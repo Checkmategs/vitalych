@@ -2,6 +2,7 @@ import { useState, type KeyboardEvent, type MouseEvent, type ReactNode } from 'r
 import {
   allFields,
   createCustomField,
+  deleteCustomField,
   getByPath,
   isCustomField,
   jinjaForSlug,
@@ -9,12 +10,14 @@ import {
   listToStrings,
   setByPath,
   textFieldsOf,
-  updateCustomFieldLabel,
+  updateCustomField,
+  validateFieldUpdate,
   type FieldDef,
 } from '../schema/fields'
 import { countObjectInstances } from '../schema/objects'
 import { FieldEditModal } from './FieldEditModal'
 import { ObjectsSection } from './ObjectsSection'
+import { copyTextToClipboard } from '../utils/clipboard'
 
 type Props = {
   data: Record<string, unknown>
@@ -55,30 +58,41 @@ function Accordion({
 }
 
 function CopySlugButton({ slug }: { slug: string }) {
-  const [copied, setCopied] = useState(false)
+  const [status, setStatus] = useState<'idle' | 'copied' | 'error'>('idle')
 
   const onCopy = async (e: MouseEvent) => {
     e.preventDefault()
     e.stopPropagation()
-    try {
-      await navigator.clipboard.writeText(jinjaForSlug(slug))
-      setCopied(true)
-      window.setTimeout(() => setCopied(false), 1500)
-    } catch {
-      /* ignore */
+    const text = jinjaForSlug(slug)
+    const ok = await copyTextToClipboard(text)
+    if (ok) {
+      setStatus('copied')
+      window.setTimeout(() => setStatus('idle'), 1500)
+    } else {
+      setStatus('error')
+      window.setTimeout(() => setStatus('idle'), 2500)
     }
   }
+
+  const title =
+    status === 'copied'
+      ? 'Скопировано'
+      : status === 'error'
+        ? 'Не удалось скопировать'
+        : `Копировать ${jinjaForSlug(slug)}`
 
   return (
     <button
       type="button"
-      className="var-card-copy"
+      className={['var-card-copy', status === 'error' ? 'var-card-copy--error' : '']
+        .filter(Boolean)
+        .join(' ')}
       onClick={(e) => void onCopy(e)}
-      title={copied ? 'Скопировано' : `Копировать ${jinjaForSlug(slug)}`}
-      aria-label={copied ? 'Скопировано' : `Копировать ${jinjaForSlug(slug)}`}
+      title={title}
+      aria-label={title}
     >
       <span className="var-card-copy-icon" aria-hidden>
-        {copied ? '✓' : '⧉'}
+        {status === 'copied' ? '✓' : status === 'error' ? '!' : '⧉'}
       </span>
     </button>
   )
@@ -269,10 +283,26 @@ export function VariablesPanel({ data, onChange }: Props) {
           field={modal.field}
           value={getByPath(data, modal.field.path)}
           onChange={(v) => setField(modal.field, v)}
-          labelEditable={isCustomField(data, modal.field.slug)}
-          onLabelChange={(label) => {
-            onChange(updateCustomFieldLabel(data, modal.field.slug, label))
+          settingsEditable={isCustomField(data, modal.field.slug)}
+          onMetaChange={(draft) => {
+            const err = validateFieldUpdate(data, modal.field.slug, draft)
+            if (err === 'label') return 'Укажите название'
+            if (err === 'slug') return 'Код: латиница, цифры, _, сегменты через точку'
+            if (err === 'duplicate') return 'Поле с таким кодом уже есть'
+            const result = updateCustomField(data, modal.field.slug, draft)
+            if (!result) return 'Не удалось обновить поле'
+            onChange(result.data)
+            setModal({ mode: 'edit', field: result.field })
+            return null
           }}
+          onDelete={
+            isCustomField(data, modal.field.slug)
+              ? () => {
+                  onChange(deleteCustomField(data, modal.field.slug))
+                  setModal(null)
+                }
+              : undefined
+          }
           onClose={() => setModal(null)}
         />
       ) : null}

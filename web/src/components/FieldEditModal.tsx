@@ -20,9 +20,11 @@ type EditProps = {
   value: unknown
   onChange: (value: unknown) => void
   onClose: () => void
-  /** When true, label settings are editable (custom fields). */
-  labelEditable?: boolean
-  onLabelChange?: (label: string) => void
+  /** When true, slug/kind/label are editable and delete is available (custom fields). */
+  settingsEditable?: boolean
+  existingSlugs?: Set<string>
+  onMetaChange?: (draft: { slug: string; label: string; kind: FieldDef['kind'] }) => string | null
+  onDelete?: () => void
 }
 
 type CreateProps = {
@@ -448,23 +450,31 @@ function EditFieldModal({
   value,
   onChange,
   onClose,
-  labelEditable = false,
-  onLabelChange,
+  settingsEditable = false,
+  onMetaChange,
+  onDelete,
 }: {
   field: FieldDef
   value: unknown
   onChange: (value: unknown) => void
   onClose: () => void
-  labelEditable?: boolean
-  onLabelChange?: (label: string) => void
+  settingsEditable?: boolean
+  onMetaChange?: (draft: { slug: string; label: string; kind: FieldDef['kind'] }) => string | null
+  onDelete?: () => void
 }) {
   const settingsOpen = field.kind !== 'list'
   const textValue = value == null ? '' : String(value)
+  const [slugDraft, setSlugDraft] = useState(field.slug)
   const [labelDraft, setLabelDraft] = useState(field.label)
+  const [kindDraft, setKindDraft] = useState(field.kind)
+  const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    setSlugDraft(field.slug)
     setLabelDraft(field.label)
-  }, [field.label, field.slug])
+    setKindDraft(field.kind)
+    setError(null)
+  }, [field.label, field.slug, field.kind])
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -473,6 +483,22 @@ function EditFieldModal({
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
+
+  const applyMeta = (next: { slug: string; label: string; kind: FieldDef['kind'] }) => {
+    if (!settingsEditable || !onMetaChange) return
+    const err = onMetaChange(next)
+    if (err) {
+      setError(err)
+      return
+    }
+    setError(null)
+  }
+
+  const handleDelete = () => {
+    if (!onDelete) return
+    if (!window.confirm(`Удалить поле «${field.label}» (${field.slug})?`)) return
+    onDelete()
+  }
 
   return (
     <div className="field-modal-overlay" role="presentation" onClick={onClose}>
@@ -487,7 +513,7 @@ function EditFieldModal({
           <h2 id="field-modal-title" className="field-modal-title">
             Редактирование поля
           </h2>
-          <span className="field-modal-slug-pill">{field.slug}</span>
+          <span className="field-modal-slug-pill">{settingsEditable ? slugDraft : field.slug}</span>
           <button type="button" className="field-modal-close" onClick={onClose} aria-label="Закрыть">
             ×
           </button>
@@ -495,25 +521,62 @@ function EditFieldModal({
 
         <div className="field-modal-body">
           <FieldSettings
-            kind={field.kind}
-            slug={field.slug}
-            label={labelEditable ? labelDraft : field.label}
-            kindDisabled
-            slugDisabled
-            labelDisabled={!labelEditable}
+            kind={settingsEditable ? kindDraft : field.kind}
+            slug={settingsEditable ? slugDraft : field.slug}
+            label={settingsEditable ? labelDraft : field.label}
+            kindDisabled={!settingsEditable}
+            slugDisabled={!settingsEditable}
+            labelDisabled={!settingsEditable}
+            onKindChange={
+              settingsEditable
+                ? (k) => {
+                    setKindDraft(k)
+                    applyMeta({ slug: slugDraft, label: labelDraft, kind: k })
+                  }
+                : undefined
+            }
+            onSlugChange={
+              settingsEditable
+                ? (s) => {
+                    setSlugDraft(s)
+                    setError(null)
+                  }
+                : undefined
+            }
             onLabelChange={
-              labelEditable
+              settingsEditable
                 ? (s) => {
                     setLabelDraft(s)
-                    onLabelChange?.(s)
+                    applyMeta({ slug: slugDraft, label: s, kind: kindDraft })
                   }
                 : undefined
             }
             defaultOpen={settingsOpen}
           />
 
+          {settingsEditable ? (
+            <div className="field-modal-meta-actions">
+              <button
+                type="button"
+                className="btn"
+                onClick={() =>
+                  applyMeta({ slug: slugDraft.trim(), label: labelDraft.trim(), kind: kindDraft })
+                }
+              >
+                Применить код
+              </button>
+              {onDelete ? (
+                <button type="button" className="btn btn-danger" onClick={handleDelete}>
+                  Удалить поле
+                </button>
+              ) : null}
+            </div>
+          ) : null}
+
+          {error ? <div className="field-modal-error">{error}</div> : null}
+
           <ModalAccordion title="Значение" icon="✎" defaultOpen>
-            {field.kind === 'list' ? (
+            {kindDraft === 'list' || (!settingsEditable && field.kind === 'list') ? (
               <ListValueEditor rawList={value} onChangeRaw={(next) => onChange(next)} />
             ) : (
               <TextValueEditor value={textValue} onChange={(v) => onChange(v)} autoFocus />
@@ -542,8 +605,9 @@ export function FieldEditModal(props: Props) {
       value={props.value}
       onChange={props.onChange}
       onClose={props.onClose}
-      labelEditable={props.labelEditable}
-      onLabelChange={props.onLabelChange}
+      settingsEditable={props.settingsEditable}
+      onMetaChange={props.onMetaChange}
+      onDelete={props.onDelete}
     />
   )
 }

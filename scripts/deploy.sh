@@ -73,6 +73,36 @@ if command -v systemctl >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
   sudo systemctl restart vitalych.service
   sleep 1
   sudo systemctl --no-pager --full status vitalych.service || true
+elif command -v systemctl >/dev/null 2>&1; then
+  # No passwordless sudo: user systemd unit (survives closing SSH/terminal).
+  export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
+  mkdir -p "\$HOME/.config/systemd/user"
+  if [[ -f deploy/vitalych.user.service ]]; then
+    cp deploy/vitalych.user.service "\$HOME/.config/systemd/user/vitalych.service"
+  else
+    sed "s|/opt/vitalych|\$DIR|g; s|WantedBy=multi-user.target|WantedBy=default.target|" \
+      deploy/vitalych.service > "\$HOME/.config/systemd/user/vitalych.service"
+    # Fix WorkingDirectory/ExecStart to absolute DIR if unit still points elsewhere
+    sed -i "s|WorkingDirectory=.*|WorkingDirectory=\$DIR|; s|ExecStart=.*/uvicorn|ExecStart=\$DIR/.venv/bin/uvicorn|" \
+      "\$HOME/.config/systemd/user/vitalych.service" || true
+  fi
+  # Free port from any previous nohup instance
+  if command -v fuser >/dev/null 2>&1; then
+    fuser -k 8080/tcp >/dev/null 2>&1 || true
+  elif command -v lsof >/dev/null 2>&1; then
+    pid=\$(lsof -t -iTCP:8080 -sTCP:LISTEN 2>/dev/null || true)
+    if [[ -n "\${pid:-}" ]]; then
+      kill \$pid 2>/dev/null || true
+      sleep 1
+    fi
+  fi
+  systemctl --user daemon-reload
+  systemctl --user enable vitalych.service
+  systemctl --user restart vitalych.service
+  # Persist across logout/reboot when allowed (needs root once)
+  loginctl enable-linger "\$(whoami)" 2>/dev/null || true
+  sleep 1
+  systemctl --user --no-pager --full status vitalych.service || true
 else
   if command -v fuser >/dev/null 2>&1; then
     fuser -k 8080/tcp >/dev/null 2>&1 || true

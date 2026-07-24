@@ -95,9 +95,14 @@ chmod +x scripts/deploy.sh
 После деплоя: http://10.91.0.142:8080/  
 Health: http://10.91.0.142:8080/api/health
 
-На сервере (если есть systemd + sudo):
+На сервере:
 
 ```bash
+# user-сервис (без sudo) — переживает закрытие терминала/SSH
+systemctl --user status vitalych
+systemctl --user restart vitalych
+
+# если когда-нибудь будет root-unit:
 sudo systemctl status vitalych
 sudo systemctl restart vitalych
 ```

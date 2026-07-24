@@ -403,6 +403,9 @@ class _DocxBuilder:
             color="#999999",
         )
 
+    def add_page_break(self) -> None:
+        self.doc.add_page_break()
+
     def save(self, out_path: Path) -> Path:
         out_path.parent.mkdir(parents=True, exist_ok=True)
         self.doc.save(str(out_path))
@@ -428,6 +431,11 @@ def markdown_to_docx(
         stripped = line.strip()
 
         if not stripped:
+            i += 1
+            continue
+
+        if stripped == r"\newpage":
+            builder.add_page_break()
             i += 1
             continue
 

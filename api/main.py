@@ -159,6 +159,26 @@ def render(body: RenderBody = RenderBody()) -> dict[str, list[str]]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+@app.get("/api/download/{filename}")
+def download_docx(filename: str) -> FileResponse:
+    """Serve a generated .docx from out/ (no path traversal, docx only)."""
+    name = Path(filename).name
+    if name != filename or not name.endswith(".docx") or ".." in filename:
+        raise HTTPException(status_code=400, detail="Only .docx filenames in out/ are allowed")
+    path = (OUT_DIR / name).resolve()
+    try:
+        path.relative_to(OUT_DIR.resolve())
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail="Invalid path") from e
+    if not path.is_file():
+        raise HTTPException(status_code=404, detail=f"File not found: {name}")
+    return FileResponse(
+        path,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        filename=name,
+    )
+
+
 def _mount_frontend() -> None:
     """Serve Vite build from web/dist when present (production / LAN deploy)."""
     if not DIST_DIR.is_dir():

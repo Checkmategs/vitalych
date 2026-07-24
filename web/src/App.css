@@ -82,6 +82,28 @@
   border-color: var(--accent-hover);
 }
 
+.btn-danger {
+  background: #fff;
+  border-color: #d88;
+  color: #a33;
+}
+
+.btn-danger:hover:not(:disabled) {
+  background: #fff5f5;
+  border-color: #c66;
+}
+
+.field-modal-meta-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+.var-card-copy--error {
+  color: #a33;
+}
+
 .topbar-status {
   margin-left: auto;
   font-size: 12px;
@@ -1039,6 +1061,48 @@
   flex-wrap: wrap;
   gap: 8px;
   margin-top: 10px;
+}
+
+.obj-type-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin-top: 8px;
+}
+
+.obj-mode-fieldset {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 12px;
+  margin: 0;
+}
+
+.obj-mode-option {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 13px;
+  margin: 4px 0;
+}
+
+.obj-type-attrs {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.obj-type-attr-row {
+  display: grid;
+  grid-template-columns: 1fr 1fr minmax(72px, 90px) auto;
+  gap: 6px;
+  align-items: center;
+}
+
+.obj-jinja-code--compact {
+  margin-top: 8px;
+  max-height: 120px;
+  overflow: auto;
 }
 
 .obj-attr {

@@ -218,6 +218,104 @@ export function updateCustomFieldLabel(
   return { ...data, [UI_KEY]: ui }
 }
 
+/** Remove leaf key at path; leaves empty parents in place. */
+export function deleteByPath(obj: unknown, path: string[]): unknown {
+  if (path.length === 0) return obj
+  if (obj == null || typeof obj !== 'object' || Array.isArray(obj)) return obj
+  const [head, ...rest] = path
+  const base = { ...(obj as Record<string, unknown>) }
+  if (rest.length === 0) {
+    delete base[head]
+    return base
+  }
+  if (!(head in base)) return base
+  base[head] = deleteByPath(base[head], rest)
+  return base
+}
+
+function coerceFieldValue(value: unknown, fromKind: FieldDef['kind'], toKind: FieldDef['kind']): unknown {
+  if (fromKind === toKind) return value
+  if (toKind === 'list') {
+    if (Array.isArray(value)) return value
+    const s = value == null ? '' : String(value).trim()
+    return s ? [s] : []
+  }
+  // text / textarea
+  if (Array.isArray(value)) {
+    return listToStrings(value)
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .join('\n')
+  }
+  return value == null ? '' : String(value)
+}
+
+export type FieldUpdateError = FieldCreateError
+
+/** Validate draft when updating a custom field; allows keeping the same slug. */
+export function validateFieldUpdate(
+  data: Record<string, unknown>,
+  oldSlug: string,
+  draft: { slug: string; label: string; kind: FieldDef['kind'] },
+): FieldUpdateError {
+  const slug = draft.slug.trim()
+  const label = draft.label.trim()
+  if (!label) return 'label'
+  if (!isValidSlug(slug)) return 'slug'
+  if (slug !== oldSlug && allFields(data).some((f) => f.slug === slug)) return 'duplicate'
+  return null
+}
+
+/**
+ * Update custom field slug/label/kind; moves value on slug change and coerces on kind change.
+ * Returns null if field is not custom.
+ */
+export function updateCustomField(
+  data: Record<string, unknown>,
+  oldSlug: string,
+  draft: { slug: string; label: string; kind: FieldDef['kind'] },
+): { data: Record<string, unknown>; field: FieldDef } | null {
+  const custom = readCustomFields(data)
+  const idx = custom.findIndex((f) => f.slug === oldSlug)
+  if (idx < 0) return null
+
+  const old = custom[idx]
+  const slug = draft.slug.trim()
+  const label = draft.label.trim()
+  const path = pathFromSlug(slug)
+  const field: FieldDef = { slug, label, path, kind: draft.kind }
+
+  let value = getByPath(data, old.path)
+  value = coerceFieldValue(value, old.kind, draft.kind)
+
+  let next = data
+  if (oldSlug !== slug) {
+    next = deleteByPath(next, old.path) as Record<string, unknown>
+  }
+  next = setByPath(next, path, value) as Record<string, unknown>
+
+  const nextCustom = [...custom]
+  nextCustom[idx] = field
+  const ui = { ...(asRecord(next[UI_KEY]) ?? {}), [CUSTOM_FIELDS_KEY]: nextCustom }
+  next = { ...next, [UI_KEY]: ui }
+  return { data: next, field }
+}
+
+/** Remove custom field def and its value leaf. No-op for unknown / builtin slugs. */
+export function deleteCustomField(
+  data: Record<string, unknown>,
+  slug: string,
+): Record<string, unknown> {
+  const custom = readCustomFields(data)
+  const idx = custom.findIndex((f) => f.slug === slug)
+  if (idx < 0) return data
+  const field = custom[idx]
+  const nextCustom = custom.filter((f) => f.slug !== slug)
+  let next = deleteByPath(data, field.path) as Record<string, unknown>
+  const ui = { ...(asRecord(next[UI_KEY]) ?? {}), [CUSTOM_FIELDS_KEY]: nextCustom }
+  return { ...next, [UI_KEY]: ui }
+}
+
 export function jinjaForSlug(slug: string): string {
   return `{{ ${slug} }}`
 }

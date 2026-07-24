@@ -1,17 +1,21 @@
 import { useState } from 'react'
 import {
-  JINJA_HINT,
-  OBJECT_TYPES,
   addChild,
   addParent,
   asObjectList,
-  childDisplayName,
   getChildList,
+  jinjaHintForType,
   parentDisplayName,
+  childDisplayName,
+  readObjectTypes,
   type ObjectTypeDef,
   type Selection,
 } from '../schema/objects'
-import { ObjectEditModal, ObjectTypeAddCard } from './ObjectEditModal'
+import {
+  ObjectEditModal,
+  ObjectTypeAddCard,
+  ObjectTypeFormModal,
+} from './ObjectEditModal'
 
 type Props = {
   data: Record<string, unknown>
@@ -63,39 +67,67 @@ function TypeTree({
       </div>
       {open ? (
         <div className="obj-tree-children">
-          {parents.map((parent, pi) => {
-            const parentSel =
-              selection != null &&
-              selection.typeKey === type.key &&
-              'parentIndex' in selection &&
-              selection.parentIndex === pi &&
-              selection.kind === 'parent'
-            const children = getChildList(parent, type.childKey)
-            return (
-              <ParentNode
-                key={pi}
-                type={type}
-                parent={parent}
-                parentIndex={pi}
-                children={children}
-                selection={selection}
-                parentSelected={Boolean(parentSel)}
-                onSelect={onSelect}
-                onAddChild={(pIndex) => {
-                  const { data: next, childIndex } = addChild(data, type, pIndex)
-                  onChange(next)
-                  if (childIndex >= 0) {
-                    onSelect({
-                      kind: 'child',
-                      typeKey: type.key,
-                      parentIndex: pIndex,
-                      childIndex,
-                    })
-                  }
-                }}
-              />
-            )
-          })}
+          {type.mode === 'flat'
+            ? parents.map((parent, pi) => {
+                const parentSel =
+                  selection != null &&
+                  selection.typeKey === type.key &&
+                  selection.kind === 'parent' &&
+                  selection.parentIndex === pi
+                return (
+                  <button
+                    key={pi}
+                    type="button"
+                    className={[
+                      'obj-tree-row',
+                      'obj-tree-row--leaf',
+                      parentSel ? 'obj-tree-row--active' : '',
+                    ]
+                      .filter(Boolean)
+                      .join(' ')}
+                    onClick={() =>
+                      onSelect({ kind: 'parent', typeKey: type.key, parentIndex: pi })
+                    }
+                  >
+                    <span className="obj-tree-label">
+                      {parentDisplayName(parent)} ({type.key})
+                    </span>
+                  </button>
+                )
+              })
+            : parents.map((parent, pi) => {
+                const parentSel =
+                  selection != null &&
+                  selection.typeKey === type.key &&
+                  'parentIndex' in selection &&
+                  selection.parentIndex === pi &&
+                  selection.kind === 'parent'
+                const children = getChildList(parent, type.childKey)
+                return (
+                  <ParentNode
+                    key={pi}
+                    type={type}
+                    parent={parent}
+                    parentIndex={pi}
+                    children={children}
+                    selection={selection}
+                    parentSelected={Boolean(parentSel)}
+                    onSelect={onSelect}
+                    onAddChild={(pIndex) => {
+                      const { data: next, childIndex } = addChild(data, type, pIndex)
+                      onChange(next)
+                      if (childIndex >= 0) {
+                        onSelect({
+                          kind: 'child',
+                          typeKey: type.key,
+                          parentIndex: pIndex,
+                          childIndex,
+                        })
+                      }
+                    }}
+                  />
+                )
+              })}
           <button
             type="button"
             className="btn-link obj-tree-add"
@@ -201,24 +233,34 @@ function ParentNode({
   )
 }
 
-function JinjaHint() {
+function JinjaHint({ types }: { types: ObjectTypeDef[] }) {
   const [open, setOpen] = useState(false)
+  const primary = types[0]
+  if (!primary) return null
   return (
     <div className="obj-jinja-hint">
       <button type="button" className="btn-link" onClick={() => setOpen((v) => !v)}>
         {open ? '▾' : '▸'} Как вставить в шаблон
       </button>
-      {open ? <pre className="obj-jinja-code">{JINJA_HINT}</pre> : null}
+      {open ? (
+        <pre className="obj-jinja-code">{jinjaHintForType(primary)}</pre>
+      ) : null}
     </div>
   )
 }
 
 export function ObjectsSection({ data, onChange }: Props) {
+  const types = readObjectTypes(data)
   const [treeSelection, setTreeSelection] = useState<Selection | null>({
     kind: 'type',
-    typeKey: 'module',
+    typeKey: types[0]?.key ?? 'module',
   })
   const [modalSelection, setModalSelection] = useState<EditableSelection | null>(null)
+  const [typeForm, setTypeForm] = useState<
+    | { mode: 'create' }
+    | { mode: 'edit'; type: ObjectTypeDef }
+    | null
+  >(null)
 
   const openSelection = (sel: Selection) => {
     setTreeSelection(sel)
@@ -234,13 +276,15 @@ export function ObjectsSection({ data, onChange }: Props) {
       ? treeSelection.typeKey
       : treeSelection && 'typeKey' in treeSelection
         ? treeSelection.typeKey
-        : 'module'
+        : types[0]?.key ?? 'module'
+
+  const selectedType = types.find((t) => t.key === typeKey) ?? types[0]
 
   return (
     <div className="objects-section">
       <div className="objects-layout objects-layout--tree-only">
         <div className="objects-tree">
-          {OBJECT_TYPES.map((type) => (
+          {types.map((type) => (
             <TypeTree
               key={type.key}
               type={type}
@@ -250,15 +294,37 @@ export function ObjectsSection({ data, onChange }: Props) {
               onChange={onChange}
             />
           ))}
+          <button
+            type="button"
+            className="btn-link obj-tree-add"
+            onClick={() => setTypeForm({ mode: 'create' })}
+          >
+            + Новый тип объекта
+          </button>
         </div>
-        <ObjectTypeAddCard
-          typeKey={typeKey}
-          data={data}
-          onChange={onChange}
-          onCreated={(sel) => openSelection(sel)}
-        />
+        {selectedType ? (
+          <ObjectTypeAddCard
+            type={selectedType}
+            data={data}
+            onChange={onChange}
+            onCreated={(sel) => openSelection(sel)}
+            onEditType={
+              selectedType.builtin
+                ? undefined
+                : () => setTypeForm({ mode: 'edit', type: selectedType })
+            }
+            onDeleteType={
+              selectedType.builtin
+                ? undefined
+                : () => {
+                    setTreeSelection({ kind: 'type', typeKey: types[0]?.key ?? 'module' })
+                    setModalSelection(null)
+                  }
+            }
+          />
+        ) : null}
       </div>
-      <JinjaHint />
+      <JinjaHint types={types} />
 
       {modalSelection ? (
         <ObjectEditModal
@@ -273,6 +339,21 @@ export function ObjectsSection({ data, onChange }: Props) {
           onSelectChild={(sel) => {
             setTreeSelection(sel)
             setModalSelection(sel)
+          }}
+        />
+      ) : null}
+
+      {typeForm ? (
+        <ObjectTypeFormModal
+          data={data}
+          mode={typeForm.mode}
+          initial={typeForm.mode === 'edit' ? typeForm.type : undefined}
+          onChange={onChange}
+          onClose={() => setTypeForm(null)}
+          onSaved={(type) => {
+            setTypeForm(null)
+            setTreeSelection({ kind: 'type', typeKey: type.key })
+            setModalSelection(null)
           }}
         />
       ) : null}
