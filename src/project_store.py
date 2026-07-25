@@ -32,11 +32,22 @@ def slugify(name: str) -> str:
 
 
 def list_projects(session: Session) -> list[Project]:
-    return list(session.scalars(select(Project).order_by(Project.updated_at.desc())).all())
+    return list(
+        session.scalars(
+            select(Project)
+            .where(Project.deleted_at.is_(None))
+            .order_by(Project.updated_at.desc())
+        ).all()
+    )
 
 
 def _slug_taken(session: Session, slug: str) -> bool:
-    return session.scalar(select(Project.id).where(Project.slug == slug)) is not None
+    return (
+        session.scalar(
+            select(Project.id).where(Project.slug == slug, Project.deleted_at.is_(None))
+        )
+        is not None
+    )
 
 
 def _unique_slug(session: Session, base: str) -> str:
@@ -80,11 +91,16 @@ def create_project(
 
 
 def get_project(session: Session, project_id: uuid.UUID) -> Project | None:
-    return session.get(Project, project_id)
+    project = session.get(Project, project_id)
+    if project is None or project.deleted_at is not None:
+        return None
+    return project
 
 
 def get_project_by_slug(session: Session, slug: str) -> Project | None:
-    return session.scalar(select(Project).where(Project.slug == slug))
+    return session.scalar(
+        select(Project).where(Project.slug == slug, Project.deleted_at.is_(None))
+    )
 
 
 def update_project(
@@ -114,7 +130,8 @@ def update_project(
 
 
 def delete_project(session: Session, project: Project) -> None:
-    session.delete(project)
+    project.deleted_at = datetime.now(timezone.utc)
+    session.add(project)
     session.flush()
 
 
@@ -143,10 +160,31 @@ def list_versions(session: Session, project_id: uuid.UUID) -> list[ProjectVersio
     return list(
         session.scalars(
             select(ProjectVersion)
-            .where(ProjectVersion.project_id == project_id)
+            .where(
+                ProjectVersion.project_id == project_id,
+                ProjectVersion.deleted_at.is_(None),
+            )
             .order_by(ProjectVersion.created_at.desc())
         ).all()
     )
+
+
+def get_version(
+    session: Session, project_id: uuid.UUID, version_id: uuid.UUID
+) -> ProjectVersion | None:
+    return session.scalar(
+        select(ProjectVersion).where(
+            ProjectVersion.id == version_id,
+            ProjectVersion.project_id == project_id,
+            ProjectVersion.deleted_at.is_(None),
+        )
+    )
+
+
+def delete_version(session: Session, version: ProjectVersion) -> None:
+    version.deleted_at = datetime.now(timezone.utc)
+    session.add(version)
+    session.flush()
 
 
 def restore_version(session: Session, project: Project, version: ProjectVersion) -> Project:

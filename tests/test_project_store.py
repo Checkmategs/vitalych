@@ -11,8 +11,10 @@ from src.project_store import (
     create_project,
     create_version,
     delete_project,
+    delete_version,
     get_project,
     get_project_by_slug,
+    get_version,
     list_projects,
     list_versions,
     load_seed_assets,
@@ -126,7 +128,66 @@ class ProjectStoreTest(unittest.TestCase):
 
         with get_session() as session:
             self.assertIsNone(get_project(session, project_id))
+            # Soft delete keeps version rows; they still list by project_id until version soft-deleted.
+            self.assertEqual(len(list_versions(session, project_id)), 1)
+
+    def test_soft_delete_project_and_version(self) -> None:
+        suffix = uuid.uuid4().hex[:8]
+        slug = f"soft-{suffix}"
+        payload = {
+            "data": {"meta": {"title": "a"}},
+            "template_tz": "# tz",
+            "template_pz": "# pz",
+            "style_profile": "page:\n  size: A4\n",
+        }
+        with get_session() as session:
+            project = create_project(session, name="Soft", slug=slug, **payload)
+            project_id = project.id
+            version = create_version(session, project, label="keep-me")
+            version_id = version.id
+
+        with get_session() as session:
+            project = get_project(session, project_id)
+            self.assertIsNotNone(project)
+            assert project is not None
+            version = get_version(session, project_id, version_id)
+            self.assertIsNotNone(version)
+            assert version is not None
+            delete_version(session, version)
+
+        with get_session() as session:
+            self.assertIsNone(get_version(session, project_id, version_id))
             self.assertEqual(list_versions(session, project_id), [])
+            # Row still present with deleted_at set
+            from sqlalchemy import select
+            from src.models import ProjectVersion
+            raw = session.scalar(select(ProjectVersion).where(ProjectVersion.id == version_id))
+            self.assertIsNotNone(raw)
+            assert raw is not None
+            self.assertIsNotNone(raw.deleted_at)
+
+            project = get_project(session, project_id)
+            self.assertIsNotNone(project)
+            assert project is not None
+            delete_project(session, project)
+
+        with get_session() as session:
+            self.assertIsNone(get_project(session, project_id))
+            self.assertFalse(any(p.id == project_id for p in list_projects(session)))
+            from sqlalchemy import select
+            from src.models import Project
+            raw_p = session.scalar(select(Project).where(Project.id == project_id))
+            self.assertIsNotNone(raw_p)
+            assert raw_p is not None
+            self.assertIsNotNone(raw_p.deleted_at)
+            # Versions of soft-deleted project are unchanged (still have deleted_at from version delete only)
+            raw_v = session.scalar(select(ProjectVersion).where(ProjectVersion.id == version_id))
+            self.assertIsNotNone(raw_v)
+
+            # Slug reusable after soft delete
+            again = create_project(session, name="Soft Again", slug=slug, **payload)
+            self.assertEqual(again.slug, slug)
+            delete_project(session, again)
 
     def test_create_auto_slug_appends_suffix_on_collision(self) -> None:
         base_name = f"Auto Slug {uuid.uuid4().hex[:8]}"
