@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import {
   addChild,
   addParent,
@@ -20,6 +20,8 @@ import {
 type Props = {
   data: Record<string, unknown>
   onChange: (data: Record<string, unknown>) => void
+  /** Increment to open the create-type modal. */
+  createTypeNonce?: number
 }
 
 type EditableSelection = Extract<Selection, { kind: 'parent' | 'child' }>
@@ -249,7 +251,7 @@ function JinjaHint({ types }: { types: ObjectTypeDef[] }) {
   )
 }
 
-export function ObjectsSection({ data, onChange }: Props) {
+export function ObjectsSection({ data, onChange, createTypeNonce = 0 }: Props) {
   const types = readObjectTypes(data)
   const [treeSelection, setTreeSelection] = useState<Selection | null>({
     kind: 'type',
@@ -261,6 +263,11 @@ export function ObjectsSection({ data, onChange }: Props) {
     | { mode: 'edit'; type: ObjectTypeDef }
     | null
   >(null)
+
+  useEffect(() => {
+    if (createTypeNonce < 1) return
+    setTypeForm({ mode: 'create' })
+  }, [createTypeNonce])
 
   const openSelection = (sel: Selection) => {
     setTreeSelection(sel)
@@ -294,13 +301,6 @@ export function ObjectsSection({ data, onChange }: Props) {
               onChange={onChange}
             />
           ))}
-          <button
-            type="button"
-            className="btn-link obj-tree-add"
-            onClick={() => setTypeForm({ mode: 'create' })}
-          >
-            + Новый тип объекта
-          </button>
         </div>
         {selectedType ? (
           <ObjectTypeAddCard

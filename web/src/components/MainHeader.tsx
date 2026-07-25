@@ -1,8 +1,11 @@
-import iconAdd from '../assets/icons/add.svg'
-import iconChevron from '../assets/icons/chevron-down.svg'
-import iconDownload from '../assets/icons/download.svg'
-import iconSave from '../assets/icons/save.svg'
-import iconTrash from '../assets/icons/trash.svg'
+import type { ReactNode } from 'react'
+import {
+  IconDownload,
+  IconPlus,
+  IconSave,
+  IconTrash,
+} from './HeaderIcons'
+import { HeaderSelect } from './HeaderSelect'
 import type { ProjectSummary, TemplateKey, VersionItem } from '../api/client'
 
 export const STORAGE_KEY = 'vitalych.projectId'
@@ -24,6 +27,8 @@ type Props = {
   activeVersionId: string | null
   onSelectProject: (id: string) => void
   onSelectVersion: (id: string) => void
+  onRenameProject: (id: string) => void
+  onRenameVersion: (id: string) => void
   onCreateProject: () => void
   onSaveProject: () => void
   onDeleteProject: () => void
@@ -40,17 +45,17 @@ function formatVersion(v: VersionItem): string {
 }
 
 function IconBtn({
-  src,
   label,
   onClick,
   disabled,
   danger,
+  children,
 }: {
-  src: string
   label: string
   onClick: () => void
   disabled?: boolean
   danger?: boolean
+  children: ReactNode
 }) {
   return (
     <button
@@ -61,9 +66,7 @@ function IconBtn({
       disabled={disabled}
       onClick={onClick}
     >
-      <span className="mh-icon">
-        <img src={src} alt="" width={14} height={14} />
-      </span>
+      {children}
     </button>
   )
 }
@@ -77,6 +80,8 @@ export function MainHeader({
   activeVersionId,
   onSelectProject,
   onSelectVersion,
+  onRenameProject,
+  onRenameVersion,
   onCreateProject,
   onSaveProject,
   onDeleteProject,
@@ -90,7 +95,7 @@ export function MainHeader({
     <header className="main-header">
       <div className="mh-left">
         <div className="mh-brand">Vitalych</div>
-        <div className="mh-seg">
+        <div className="mh-seg" role="group" aria-label="Тип документа">
           <button
             type="button"
             className={doc === 'tz' ? 'mh-seg-btn active' : 'mh-seg-btn'}
@@ -112,87 +117,72 @@ export function MainHeader({
 
       <div className="mh-center">
         <div className="mh-group">
-          <span className="mh-label">Проект:</span>
-          <div className="mh-select-wrap">
-            <select
-              className="mh-select"
-              value={projectId ?? ''}
-              disabled={disabled || projects.length === 0}
-              onChange={(e) => {
-                const id = e.target.value
-                if (id) onSelectProject(id)
-              }}
-              aria-label="Проект"
-            >
-              {projects.length === 0 ? <option value="">—</option> : null}
-              {projects.map((p) => (
-                <option key={p.id} value={p.id}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
-            <img className="mh-select-chevron" src={iconChevron} alt="" width={10} height={10} />
-          </div>
+          <span className="mh-label">Проект</span>
+          <HeaderSelect
+            ariaLabel="Проект"
+            value={projectId ?? ''}
+            disabled={disabled || projects.length === 0}
+            placeholder={projects.length === 0 ? 'Нет проектов' : '—'}
+            options={projects.map((p) => ({ value: p.id, label: p.name }))}
+            onChange={onSelectProject}
+            onRenameOption={onRenameProject}
+          />
           <div className="mh-actions">
-            <IconBtn src={iconAdd} label="Новый проект" disabled={disabled} onClick={onCreateProject} />
+            <IconBtn label="Новый проект" disabled={disabled} onClick={onCreateProject}>
+              <IconPlus />
+            </IconBtn>
             <IconBtn
-              src={iconSave}
               label="Сохранить проект"
               disabled={disabled || !projectId}
               onClick={onSaveProject}
-            />
+            >
+              <IconSave />
+            </IconBtn>
             <IconBtn
-              src={iconTrash}
               label="Удалить проект"
               danger
               disabled={disabled || !projectId}
               onClick={onDeleteProject}
-            />
+            >
+              <IconTrash />
+            </IconBtn>
           </div>
         </div>
 
         <div className="mh-group">
-          <span className="mh-label">Версия:</span>
-          <div className="mh-select-wrap">
-            <select
-              className="mh-select"
-              value={activeVersionId ?? ''}
-              disabled={disabled || versions.length === 0}
-              onChange={(e) => {
-                const id = e.target.value
-                if (id) onSelectVersion(id)
-              }}
-              aria-label="Версия"
-            >
-              {versions.length === 0 ? <option value="">—</option> : null}
-              {versions.map((v) => (
-                <option key={v.id} value={v.id}>
-                  {formatVersion(v)}
-                </option>
-              ))}
-            </select>
-            <img className="mh-select-chevron" src={iconChevron} alt="" width={10} height={10} />
-          </div>
+          <span className="mh-label">Версия</span>
+          <HeaderSelect
+            ariaLabel="Версия"
+            value={activeVersionId ?? ''}
+            disabled={disabled || versions.length === 0}
+            placeholder={versions.length === 0 ? 'Нет версий' : '—'}
+            options={versions.map((v) => ({ value: v.id, label: formatVersion(v) }))}
+            onChange={onSelectVersion}
+            onRenameOption={onRenameVersion}
+          />
           <div className="mh-actions">
             <IconBtn
-              src={iconAdd}
               label="Новая версия"
               disabled={disabled || !projectId}
               onClick={onCreateVersion}
-            />
+            >
+              <IconPlus />
+            </IconBtn>
             <IconBtn
-              src={iconSave}
               label="Сохранить версию"
               disabled={disabled || !projectId || !activeVersionId}
               onClick={onSaveVersion}
-            />
+            >
+              <IconSave />
+            </IconBtn>
             <IconBtn
-              src={iconTrash}
               label="Удалить версию"
               danger
               disabled={disabled || !projectId || !activeVersionId}
               onClick={onDeleteVersion}
-            />
+            >
+              <IconTrash />
+            </IconBtn>
           </div>
         </div>
       </div>
@@ -200,13 +190,11 @@ export function MainHeader({
       <div className="mh-right">
         <button
           type="button"
-          className="mh-download"
+          className="mh-download btn btn-primary"
           disabled={disabled || !projectId}
           onClick={onDownload}
         >
-          <span className="mh-icon mh-icon-download">
-            <img src={iconDownload} alt="" width={16} height={16} />
-          </span>
+          <IconDownload />
           Скачать docx
         </button>
       </div>

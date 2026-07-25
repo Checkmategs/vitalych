@@ -16,6 +16,7 @@ import {
   deleteVersion,
   fetchDocxBlob,
   getProject,
+  getVersion,
   listProjects,
   listVersions,
   putProject,
@@ -266,6 +267,77 @@ export default function App() {
     }
   }
 
+  const onRenameProject = async (id: string) => {
+    const current = projects.find((p) => p.id === id)
+    const name = window.prompt('Название проекта', current?.name ?? '')
+    if (name == null) return
+    const trimmed = name.trim()
+    if (!trimmed) {
+      toasts.error('Укажите название проекта')
+      return
+    }
+    if (current && trimmed === current.name) return
+    try {
+      const payload =
+        id === projectId
+          ? { ...editorPayload(), name: trimmed }
+          : await (async () => {
+              const full = await getProject(id)
+              return {
+                data: full.data,
+                template_tz: full.template_tz,
+                template_pz: full.template_pz,
+                style_profile: full.style_profile,
+                name: trimmed,
+              }
+            })()
+      const saved = await putProject(id, payload)
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === saved.id
+            ? { id: saved.id, slug: saved.slug, name: saved.name, updated_at: saved.updated_at }
+            : p,
+        ),
+      )
+      if (projectId === saved.id && dirty) {
+        setDirty(false)
+      }
+      toasts.success(`Проект переименован в «${saved.name}»`)
+    } catch (e) {
+      toasts.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const onRenameVersion = async (versionId: string) => {
+    if (!projectId) return
+    const current = versions.find((v) => v.id === versionId)
+    const label = window.prompt('Метка версии', current?.label ?? '')
+    if (label == null) return
+    const trimmed = label.trim()
+    if ((current?.label ?? '') === trimmed) return
+    try {
+      const payload =
+        versionId === activeVersionId
+          ? { ...editorPayload(), label: trimmed }
+          : await (async () => {
+              const full = await getVersion(projectId, versionId)
+              return {
+                data: full.data,
+                template_tz: full.template_tz,
+                template_pz: full.template_pz,
+                style_profile: full.style_profile,
+                label: trimmed,
+              }
+            })()
+      await putVersion(projectId, versionId, payload)
+      if (versionId === activeVersionId && dirty) setDirty(false)
+      await refreshVersions(projectId)
+      toasts.success(trimmed ? `Версия «${trimmed}»` : 'Метка версии снята')
+    } catch (e) {
+      toasts.error(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const onSaveProject = async () => {
     if (!projectId) return
     try {
@@ -412,6 +484,8 @@ export default function App() {
         activeVersionId={activeVersionId}
         onSelectProject={(id) => void selectProject(id)}
         onSelectVersion={(id) => void selectVersion(id)}
+        onRenameProject={(id) => void onRenameProject(id)}
+        onRenameVersion={(id) => void onRenameVersion(id)}
         onCreateProject={() => void onCreateProject()}
         onSaveProject={() => void onSaveProject()}
         onDeleteProject={() => void onDeleteProject()}
