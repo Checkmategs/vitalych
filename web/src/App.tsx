@@ -10,6 +10,8 @@ import {
 import {
   createProject,
   createVersion,
+  deleteProject,
+  deleteVersion,
   fetchDocxBlob,
   getProject,
   listProjects,
@@ -237,6 +239,48 @@ export default function App() {
     }
   }
 
+  const onDeleteProject = async () => {
+    if (!projectId) return
+    const name = projects.find((p) => p.id === projectId)?.name ?? 'проект'
+    if (
+      !window.confirm(
+        `Удалить проект «${name}»? Его можно будет восстановить только из базы.`,
+      )
+    ) {
+      return
+    }
+    setStatus('Удаление проекта…')
+    try {
+      await deleteProject(projectId)
+      const list = await listOrCreateDefaultProject()
+      setProjects(list)
+      const nextId = list[0]?.id
+      if (!nextId) {
+        setError('Нет проектов')
+        return
+      }
+      await openProject(nextId, doc)
+      setStatus('Проект удалён')
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const onDeleteVersion = async (versionId: string) => {
+    if (!projectId) return
+    if (!window.confirm('Удалить выбранную версию?')) {
+      return
+    }
+    setStatus('Удаление версии…')
+    try {
+      await deleteVersion(projectId, versionId)
+      await refreshVersions(projectId)
+      setStatus('Версия удалена')
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const saveProject = async () => {
     if (!projectId) return
     setStatus('Сохранение проекта…')
@@ -327,6 +371,8 @@ export default function App() {
           onCreated={(p) => void onCreated(p)}
           onSaveVersion={(label) => void onSaveVersion(label)}
           onRestore={(vid) => void onRestore(vid)}
+          onDeleteProject={() => void onDeleteProject()}
+          onDeleteVersion={(vid) => void onDeleteVersion(vid)}
           disabled={loading}
         />
         <div className="topbar-switch">

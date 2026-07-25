@@ -24,7 +24,20 @@ type Props = {
   onCreated: (project: Project) => void
   onSaveVersion: (label?: string) => void
   onRestore: (versionId: string) => void
+  onDeleteProject: () => void
+  onDeleteVersion: (versionId: string) => void
   disabled?: boolean
+}
+
+function TrashIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path
+        fill="currentColor"
+        d="M9 3h6l1 2h4v2H4V5h4l1-2zm1 6h2v10h-2V9zm4 0h2v10h-2V9zM7 9h2v10H7V9zm-1 12h12a1 1 0 0 0 1-1V7H5v13a1 1 0 0 0 1 1z"
+      />
+    </svg>
+  )
 }
 
 function formatVersion(v: VersionItem): string {
@@ -40,6 +53,8 @@ export function ProjectBar({
   onCreated,
   onSaveVersion,
   onRestore,
+  onDeleteProject,
+  onDeleteVersion,
   disabled = false,
 }: Props) {
   const [versionId, setVersionId] = useState('')
@@ -92,6 +107,16 @@ export function ProjectBar({
       <button type="button" className="btn" disabled={disabled} onClick={() => void createNew()}>
         Новый проект
       </button>
+      <button
+        type="button"
+        className="btn-icon btn-danger"
+        disabled={disabled || !projectId}
+        onClick={onDeleteProject}
+        aria-label="Удалить проект"
+        title="Удалить проект"
+      >
+        <TrashIcon />
+      </button>
       <button type="button" className="btn" disabled={disabled || !projectId} onClick={saveVersion}>
         Сохранить версию
       </button>
@@ -117,6 +142,16 @@ export function ProjectBar({
         onClick={() => onRestore(versionId)}
       >
         Откатить
+      </button>
+      <button
+        type="button"
+        className="btn-icon btn-danger"
+        disabled={disabled || !versionId}
+        onClick={() => onDeleteVersion(versionId)}
+        aria-label="Удалить версию"
+        title="Удалить версию"
+      >
+        <TrashIcon />
       </button>
     </div>
   )

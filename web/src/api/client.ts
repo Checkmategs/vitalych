@@ -82,6 +82,24 @@ export async function putProject(id: string, body: ProjectPutBody): Promise<Proj
   return parseJson<Project>(res)
 }
 
+export async function deleteProject(id: string): Promise<{ ok: boolean }> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  })
+  return parseJson<{ ok: boolean }>(res)
+}
+
+export async function deleteVersion(
+  projectId: string,
+  versionId: string,
+): Promise<{ ok: boolean }> {
+  const res = await fetch(
+    `/api/projects/${encodeURIComponent(projectId)}/versions/${encodeURIComponent(versionId)}`,
+    { method: 'DELETE' },
+  )
+  return parseJson<{ ok: boolean }>(res)
+}
+
 export async function listVersions(projectId: string): Promise<VersionItem[]> {
   const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/versions`)
   return parseJson<VersionItem[]>(res)
