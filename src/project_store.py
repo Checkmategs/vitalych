@@ -199,7 +199,7 @@ def list_versions(session: Session, project_id: uuid.UUID) -> list[ProjectVersio
                 ProjectVersion.project_id == project_id,
                 ProjectVersion.deleted_at.is_(None),
             )
-            .order_by(ProjectVersion.created_at.desc())
+            .order_by(ProjectVersion.updated_at.desc(), ProjectVersion.created_at.desc())
         ).all()
     )
 

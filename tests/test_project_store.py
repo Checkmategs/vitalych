@@ -278,6 +278,38 @@ class ProjectStoreTest(unittest.TestCase):
         self.assertIsInstance(style_profile, str)
         self.assertTrue(style_profile)
 
+    def test_update_version_bumps_updated_at_and_list_order(self) -> None:
+        suffix = uuid.uuid4().hex[:8]
+        payload = {
+            "data": {"meta": {"title": "a"}},
+            "template_tz": "# tz",
+            "template_pz": "# pz",
+            "style_profile": "page:\n  size: A4\n",
+        }
+        with get_session() as session:
+            project = create_project(
+                session, name="Time", slug=f"time-{suffix}", **payload
+            )
+            initial_id = project.active_version_id
+            assert initial_id is not None
+            create_version(session, project, label="later", activate=True)
+
+            initial = get_version(session, project.id, initial_id)
+            assert initial is not None
+            before = initial.updated_at
+            time.sleep(0.02)
+            update_version(
+                session, initial, data={"meta": {"title": "touched"}}
+            )
+            initial_reload = get_version(session, project.id, initial_id)
+            assert initial_reload is not None
+            self.assertGreater(initial_reload.updated_at, before)
+
+            listed_after = list_versions(session, project.id)
+            self.assertEqual(listed_after[0].id, initial_id)
+
+            delete_project(session, project)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -36,7 +36,7 @@ export type VersionItem = {
   label: string | null
   note: string | null
   created_at: string
-  updated_at?: string
+  updated_at: string
 }
 
 export type VersionFull = VersionItem & {

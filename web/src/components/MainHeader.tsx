@@ -40,7 +40,8 @@ type Props = {
 }
 
 function formatVersion(v: VersionItem): string {
-  const when = v.created_at ? new Date(v.created_at).toLocaleString() : v.id.slice(0, 8)
+  const stamp = v.updated_at || v.created_at
+  const when = stamp ? new Date(stamp).toLocaleString() : v.id.slice(0, 8)
   return v.label ? `${v.label} — ${when}` : when
 }
 
