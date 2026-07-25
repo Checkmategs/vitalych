@@ -3,23 +3,40 @@ import { StructureTree } from './components/StructureTree'
 import { TemplateEditor } from './components/TemplateEditor'
 import { VariablesPanel } from './components/VariablesPanel'
 import {
+  ProjectBar,
+  persistProjectId,
+  readStoredProjectId,
+} from './components/ProjectBar'
+import {
+  createProject,
+  createVersion,
   fetchDocxBlob,
   getProject,
-  getTemplate,
+  listProjects,
+  listVersions,
   putProject,
-  putTemplate,
-  render,
+  renderProject,
+  restoreVersion,
   saveDocxAs,
+  type Project,
   type ProjectData,
+  type ProjectSummary,
   type TemplateKey,
+  type VersionItem,
 } from './api/client'
 import { findNode, outlineForDoc } from './schema/outline'
 import './App.css'
 
 export default function App() {
   const [doc, setDoc] = useState<TemplateKey>('tz')
+  const [projectId, setProjectId] = useState<string | null>(null)
+  const [projects, setProjects] = useState<ProjectSummary[]>([])
+  const [versions, setVersions] = useState<VersionItem[]>([])
   const [project, setProject] = useState<ProjectData>({})
   const [template, setTemplate] = useState('')
+  const [templateTz, setTemplateTz] = useState('')
+  const [templatePz, setTemplatePz] = useState('')
+  const [styleProfile, setStyleProfile] = useState('')
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [scrollToHeading, setScrollToHeading] = useState<string | undefined>()
   const [scrollNonce, setScrollNonce] = useState(0)
@@ -27,26 +44,92 @@ export default function App() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
 
-  const loadAll = useCallback(async (key: TemplateKey) => {
-    setLoading(true)
-    setError(null)
-    try {
-      const [proj, tpl] = await Promise.all([getProject(), getTemplate(key)])
-      setProject(proj)
-      setTemplate(tpl.content)
+  const syncFromProject = useCallback((full: Project, activeDoc: TemplateKey) => {
+    setProjectId(full.id)
+    persistProjectId(full.id)
+    setProject(full.data)
+    setTemplateTz(full.template_tz)
+    setTemplatePz(full.template_pz)
+    setStyleProfile(full.style_profile)
+    setTemplate(activeDoc === 'tz' ? full.template_tz : full.template_pz)
+  }, [])
+
+  const applyProject = useCallback(
+    (full: Project, activeDoc: TemplateKey) => {
+      syncFromProject(full, activeDoc)
       setSelectedId(null)
       setScrollToHeading(undefined)
       setScrollNonce(0)
+    },
+    [syncFromProject],
+  )
+
+  const refreshVersions = useCallback(async (id: string) => {
+    const items = await listVersions(id)
+    setVersions(items)
+  }, [])
+
+  const openProject = useCallback(
+    async (id: string, activeDoc: TemplateKey) => {
+      const full = await getProject(id)
+      applyProject(full, activeDoc)
+      await refreshVersions(id)
+    },
+    [applyProject, refreshVersions],
+  )
+
+  const loadBootstrap = useCallback(async () => {
+    setLoading(true)
+    setError(null)
+    try {
+      let list = await listProjects()
+      if (list.length === 0) {
+        const created = await createProject({ name: 'Новый проект' })
+        list = [
+          {
+            id: created.id,
+            slug: created.slug,
+            name: created.name,
+            updated_at: created.updated_at,
+          },
+        ]
+        setProjects(list)
+        applyProject(created, 'tz')
+        setVersions([])
+        return
+      }
+      setProjects(list)
+      const stored = readStoredProjectId()
+      const pick = list.find((p) => p.id === stored)?.id ?? list[0].id
+      await openProject(pick, 'tz')
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e))
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [applyProject, openProject])
 
   useEffect(() => {
-    void loadAll(doc)
-  }, [doc, loadAll])
+    void loadBootstrap()
+  }, [loadBootstrap])
+
+  const templatesForPut = (activeDoc: TemplateKey, activeTemplate: string) => ({
+    template_tz: activeDoc === 'tz' ? activeTemplate : templateTz,
+    template_pz: activeDoc === 'pz' ? activeTemplate : templatePz,
+  })
+
+  const switchDoc = (next: TemplateKey) => {
+    if (next === doc) return
+    const nextTz = doc === 'tz' ? template : templateTz
+    const nextPz = doc === 'pz' ? template : templatePz
+    setTemplateTz(nextTz)
+    setTemplatePz(nextPz)
+    setDoc(next)
+    setTemplate(next === 'tz' ? nextTz : nextPz)
+    setSelectedId(null)
+    setScrollToHeading(undefined)
+    setScrollNonce(0)
+  }
 
   const onSelectSection = (id: string) => {
     setSelectedId(id)
@@ -57,11 +140,97 @@ export default function App() {
     }
   }
 
+  const selectProject = async (id: string) => {
+    if (id === projectId) return
+    setLoading(true)
+    setError(null)
+    setStatus('')
+    try {
+      await openProject(id, doc)
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const onCreated = async (created: Project) => {
+    setProjects((prev) => {
+      const summary = {
+        id: created.id,
+        slug: created.slug,
+        name: created.name,
+        updated_at: created.updated_at,
+      }
+      if (prev.some((p) => p.id === created.id)) {
+        return prev.map((p) => (p.id === created.id ? summary : p))
+      }
+      return [...prev, summary]
+    })
+    applyProject(created, doc)
+    setVersions([])
+    setStatus(`Проект «${created.name}» создан`)
+  }
+
+  const onSaveVersion = async (label?: string) => {
+    if (!projectId) return
+    setStatus('Сохранение версии…')
+    try {
+      const tpl = templatesForPut(doc, template)
+      const saved = await putProject(projectId, {
+        data: project,
+        ...tpl,
+        style_profile: styleProfile,
+      })
+      syncFromProject(saved, doc)
+      await createVersion(projectId, label ? { label } : {})
+      await refreshVersions(projectId)
+      setStatus(label ? `Версия «${label}» сохранена` : 'Версия сохранена')
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e))
+    }
+  }
+
+  const onRestore = async (versionId: string) => {
+    if (!projectId) return
+    if (!window.confirm('Откатить проект к выбранной версии? Текущие несохранённые правки будут потеряны.')) {
+      return
+    }
+    setStatus('Откат…')
+    try {
+      const restored = await restoreVersion(projectId, versionId)
+      applyProject(restored, doc)
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === restored.id
+            ? { id: restored.id, slug: restored.slug, name: restored.name, updated_at: restored.updated_at }
+            : p,
+        ),
+      )
+      setStatus('Версия восстановлена')
+    } catch (e) {
+      setStatus(e instanceof Error ? e.message : String(e))
+    }
+  }
+
   const saveProject = async () => {
+    if (!projectId) return
     setStatus('Сохранение проекта…')
     try {
-      const saved = await putProject(project)
-      setProject(saved)
+      const tpl = templatesForPut(doc, template)
+      const saved = await putProject(projectId, {
+        data: project,
+        ...tpl,
+        style_profile: styleProfile,
+      })
+      syncFromProject(saved, doc)
+      setProjects((prev) =>
+        prev.map((p) =>
+          p.id === saved.id
+            ? { id: saved.id, slug: saved.slug, name: saved.name, updated_at: saved.updated_at }
+            : p,
+        ),
+      )
       setStatus('Проект сохранён')
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e))
@@ -69,10 +238,16 @@ export default function App() {
   }
 
   const saveTemplate = async () => {
+    if (!projectId) return
     setStatus('Сохранение шаблона…')
     try {
-      const saved = await putTemplate(doc, template)
-      setTemplate(saved.content)
+      const tpl = templatesForPut(doc, template)
+      const saved = await putProject(projectId, {
+        data: project,
+        ...tpl,
+        style_profile: styleProfile,
+      })
+      syncFromProject(saved, doc)
       setStatus(`Шаблон ${doc.toUpperCase()} сохранён`)
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e))
@@ -80,14 +255,17 @@ export default function App() {
   }
 
   const generate = async () => {
+    if (!projectId) return
     setStatus('Сохранение и генерация…')
     try {
-      const savedProj = await putProject(project)
-      setProject(savedProj)
-      const savedTpl = await putTemplate(doc, template)
-      setTemplate(savedTpl.content)
-      // On server we still write both; browser offers Save As only for .docx
-      const result = await render(doc, 'both')
+      const tpl = templatesForPut(doc, template)
+      const saved = await putProject(projectId, {
+        data: project,
+        ...tpl,
+        style_profile: styleProfile,
+      })
+      syncFromProject(saved, doc)
+      const result = await renderProject(projectId, doc, 'both')
       const docxPaths = result.written.filter((p) => p.endsWith('.docx'))
       if (docxPaths.length === 0) {
         setStatus('Сгенерировано, но .docx не найден')
@@ -97,7 +275,7 @@ export default function App() {
       const outcomes: string[] = []
       for (const path of docxPaths) {
         const name = path.split('/').pop() ?? path
-        const blob = await fetchDocxBlob(name)
+        const blob = await fetchDocxBlob(projectId, name)
         const outcome = await saveDocxAs(blob, name)
         if (outcome === 'cancelled') {
           outcomes.push(`${name}: отменено`)
@@ -117,30 +295,45 @@ export default function App() {
     <div className="app-shell">
       <header className="topbar">
         <div className="topbar-brand">Vitalych</div>
+        <ProjectBar
+          projectId={projectId}
+          projects={projects}
+          versions={versions}
+          onSelect={(id) => void selectProject(id)}
+          onCreated={(p) => void onCreated(p)}
+          onSaveVersion={(label) => void onSaveVersion(label)}
+          onRestore={(vid) => void onRestore(vid)}
+          disabled={loading}
+        />
         <div className="topbar-switch">
           <button
             type="button"
             className={doc === 'tz' ? 'seg active' : 'seg'}
-            onClick={() => setDoc('tz')}
+            onClick={() => switchDoc('tz')}
           >
             ТЗ
           </button>
           <button
             type="button"
             className={doc === 'pz' ? 'seg active' : 'seg'}
-            onClick={() => setDoc('pz')}
+            onClick={() => switchDoc('pz')}
           >
             ПЗ
           </button>
         </div>
         <div className="topbar-actions">
-          <button type="button" className="btn" onClick={() => void saveProject()} disabled={loading}>
+          <button type="button" className="btn" onClick={() => void saveProject()} disabled={loading || !projectId}>
             Сохранить проект
           </button>
-          <button type="button" className="btn" onClick={() => void saveTemplate()} disabled={loading}>
+          <button type="button" className="btn" onClick={() => void saveTemplate()} disabled={loading || !projectId}>
             Сохранить шаблон
           </button>
-          <button type="button" className="btn btn-primary" onClick={() => void generate()} disabled={loading}>
+          <button
+            type="button"
+            className="btn btn-primary"
+            onClick={() => void generate()}
+            disabled={loading || !projectId}
+          >
             Сгенерировать
           </button>
         </div>
@@ -152,7 +345,7 @@ export default function App() {
       {error ? (
         <div className="app-error">
           Не удалось загрузить данные: {error}
-          <button type="button" className="btn" onClick={() => void loadAll(doc)}>
+          <button type="button" className="btn" onClick={() => void loadBootstrap()}>
             Повторить
           </button>
         </div>

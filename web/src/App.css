@@ -10,12 +10,36 @@
 .topbar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 12px;
-  height: var(--topbar-height);
-  padding: 0 12px;
+  min-height: var(--topbar-height);
+  padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   background: #fff;
   flex-shrink: 0;
+}
+
+.project-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.project-bar-label {
+  font-size: 12px;
+  color: var(--text-muted);
+  margin-left: 4px;
+}
+
+.project-select {
+  max-width: 180px;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: var(--text);
+  background: #fff;
 }
 
 .topbar-brand {
