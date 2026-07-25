@@ -211,6 +211,8 @@ def api_put_project(project_id: uuid.UUID, body: ProjectPutBody) -> dict[str, An
             if body.name is not None:
                 kwargs["name"] = body.name
             update_project(session, project, **kwargs)
+            if not list_versions(session, project_id):
+                create_version(session, project, label="Начальная")
             return _project_full(project)
     except HTTPException:
         raise

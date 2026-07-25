@@ -299,6 +299,7 @@ export default function App() {
             : p,
         ),
       )
+      await refreshVersions(projectId)
       setStatus('Проект сохранён')
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e))
@@ -316,6 +317,7 @@ export default function App() {
         style_profile: styleProfile,
       })
       syncFromProject(saved, doc)
+      await refreshVersions(projectId)
       setStatus(`Шаблон ${doc.toUpperCase()} сохранён`)
     } catch (e) {
       setStatus(e instanceof Error ? e.message : String(e))
@@ -333,6 +335,7 @@ export default function App() {
         style_profile: styleProfile,
       })
       syncFromProject(saved, doc)
+      await refreshVersions(projectId)
       const result = await renderProject(projectId, doc, 'both')
       const docxPaths = result.written.filter((p) => p.endsWith('.docx'))
       if (docxPaths.length === 0) {

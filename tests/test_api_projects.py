@@ -78,7 +78,14 @@ class ApiProjectsTest(unittest.TestCase):
 
         versions0 = self.client.get(f"/api/projects/{project_id}/versions")
         self.assertEqual(versions0.status_code, 200)
-        self.assertEqual(versions0.json(), [])
+        self.assertEqual(len(versions0.json()), 1)
+        self.assertEqual(versions0.json()[0]["label"], "Начальная")
+
+        # Second PUT must not create another auto-version while one already exists.
+        put1b = self.client.put(f"/api/projects/{project_id}", json={"data": data_v1})
+        self.assertEqual(put1b.status_code, 200, put1b.text)
+        versions0b = self.client.get(f"/api/projects/{project_id}/versions")
+        self.assertEqual(len(versions0b.json()), 1)
 
         ver = self.client.post(
             f"/api/projects/{project_id}/versions",
@@ -93,6 +100,8 @@ class ApiProjectsTest(unittest.TestCase):
         put2 = self.client.put(f"/api/projects/{project_id}", json={"data": data_v2})
         self.assertEqual(put2.status_code, 200, put2.text)
         self.assertEqual(put2.json()["data"]["meta"]["title"], "v2")
+        versions_after_put2 = self.client.get(f"/api/projects/{project_id}/versions")
+        self.assertEqual(len(versions_after_put2.json()), 2)
 
         restore = self.client.post(f"/api/projects/{project_id}/versions/{version_id}/restore")
         self.assertEqual(restore.status_code, 200, restore.text)
