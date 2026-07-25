@@ -8,6 +8,7 @@ from pathlib import Path
 from src.db import get_session
 from src.project_store import (
     SlugConflictError,
+    activate_version,
     create_project,
     create_version,
     delete_project,
@@ -18,9 +19,9 @@ from src.project_store import (
     list_projects,
     list_versions,
     load_seed_assets,
-    restore_version,
     slugify,
     update_project,
+    update_version,
 )
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -34,7 +35,7 @@ class SlugifyTest(unittest.TestCase):
 
 
 class ProjectStoreTest(unittest.TestCase):
-    def test_create_update_does_not_version_checkpoint_restore_and_slug_conflict(self) -> None:
+    def test_create_has_active_version_and_mutable_versions(self) -> None:
         suffix = uuid.uuid4().hex[:8]
         slug = f"store-{suffix}"
         data0 = {"meta": {"title": "v0"}}
@@ -51,6 +52,12 @@ class ProjectStoreTest(unittest.TestCase):
                 style_profile=style0,
             )
             project_id = project.id
+            self.assertIsNotNone(project.active_version_id)
+            versions = list_versions(session, project_id)
+            self.assertEqual(len(versions), 1)
+            self.assertEqual(versions[0].id, project.active_version_id)
+            self.assertEqual(versions[0].label, "Начальная")
+            v0_id = versions[0].id
 
         with get_session() as session:
             project = get_project(session, project_id)
@@ -74,21 +81,23 @@ class ProjectStoreTest(unittest.TestCase):
                 style_profile="page:\n  size: A3\n",
                 name="Store Test Updated",
             )
-            self.assertEqual(len(list_versions(session, project_id)), 0)
+            self.assertEqual(len(list_versions(session, project_id)), 1)
             self.assertEqual(project.data["meta"]["title"], "v1")
             self.assertEqual(project.name, "Store Test Updated")
             self.assertGreaterEqual(project.updated_at, updated_before)
 
-            version = create_version(session, project, label="checkpoint-1", note="after v1")
-            versions = list_versions(session, project_id)
-            self.assertEqual(len(versions), 1)
-            self.assertEqual(versions[0].id, version.id)
-            self.assertEqual(version.label, "checkpoint-1")
-            self.assertEqual(version.note, "after v1")
-            self.assertEqual(version.data, {"meta": {"title": "v1"}})
-            self.assertEqual(version.template_tz, "# tz1")
-            self.assertEqual(version.template_pz, "# pz1")
-            self.assertEqual(version.style_profile, "page:\n  size: A3\n")
+            active = get_version(session, project_id, project.active_version_id)  # type: ignore[arg-type]
+            self.assertIsNotNone(active)
+            assert active is not None
+            self.assertEqual(active.data, {"meta": {"title": "v1"}})
+            self.assertEqual(active.template_tz, "# tz1")
+
+            # Snapshot without activating — then mutate active
+            snap = create_version(
+                session, project, label="snap-v1", activate=False
+            )
+            self.assertEqual(snap.data["meta"]["title"], "v1")
+            self.assertEqual(project.active_version_id, v0_id)
 
             update_project(
                 session,
@@ -98,15 +107,38 @@ class ProjectStoreTest(unittest.TestCase):
                 template_pz="# pz2",
                 style_profile="page:\n  size: Letter\n",
             )
-            self.assertEqual(len(list_versions(session, project_id)), 1)
+            self.assertEqual(len(list_versions(session, project_id)), 2)
             self.assertEqual(project.data["meta"]["title"], "v2")
+            snap_reload = get_version(session, project_id, snap.id)
+            assert snap_reload is not None
+            self.assertEqual(snap_reload.data["meta"]["title"], "v1")
 
-            restored = restore_version(session, project, version)
-            self.assertEqual(restored.data, {"meta": {"title": "v1"}})
-            self.assertEqual(restored.template_tz, "# tz1")
-            self.assertEqual(restored.template_pz, "# pz1")
-            self.assertEqual(restored.style_profile, "page:\n  size: A3\n")
-            self.assertEqual(len(list_versions(session, project_id)), 1)
+            activated = activate_version(session, project, snap_reload)
+            self.assertEqual(activated.data["meta"]["title"], "v1")
+            self.assertEqual(activated.active_version_id, snap.id)
+
+            # Mutate only the non-active version
+            other = create_version(
+                session,
+                project,
+                label="other",
+                data={"meta": {"title": "isolated"}},
+                template_tz="# iso",
+                template_pz="# iso",
+                style_profile="page:\n  size: A4\n",
+                activate=False,
+            )
+            update_version(
+                session,
+                other,
+                data={"meta": {"title": "isolated-2"}},
+            )
+            project_reload = get_project(session, project_id)
+            assert project_reload is not None
+            self.assertEqual(project_reload.data["meta"]["title"], "v1")
+            other_reload = get_version(session, project_id, other.id)
+            assert other_reload is not None
+            self.assertEqual(other_reload.data["meta"]["title"], "isolated-2")
 
         with get_session() as session:
             with self.assertRaises(SlugConflictError):
@@ -128,8 +160,7 @@ class ProjectStoreTest(unittest.TestCase):
 
         with get_session() as session:
             self.assertIsNone(get_project(session, project_id))
-            # Soft delete keeps version rows; they still list by project_id until version soft-deleted.
-            self.assertEqual(len(list_versions(session, project_id)), 1)
+            self.assertEqual(len(list_versions(session, project_id)), 3)
 
     def test_soft_delete_project_and_version(self) -> None:
         suffix = uuid.uuid4().hex[:8]
@@ -143,7 +174,9 @@ class ProjectStoreTest(unittest.TestCase):
         with get_session() as session:
             project = create_project(session, name="Soft", slug=slug, **payload)
             project_id = project.id
-            version = create_version(session, project, label="keep-me")
+            v1_id = project.active_version_id
+            assert v1_id is not None
+            version = create_version(session, project, label="keep-me", activate=False)
             version_id = version.id
 
         with get_session() as session:
@@ -157,10 +190,10 @@ class ProjectStoreTest(unittest.TestCase):
 
         with get_session() as session:
             self.assertIsNone(get_version(session, project_id, version_id))
-            self.assertEqual(list_versions(session, project_id), [])
-            # Row still present with deleted_at set
+            self.assertEqual(len(list_versions(session, project_id)), 1)
             from sqlalchemy import select
             from src.models import ProjectVersion
+
             raw = session.scalar(select(ProjectVersion).where(ProjectVersion.id == version_id))
             self.assertIsNotNone(raw)
             assert raw is not None
@@ -169,25 +202,53 @@ class ProjectStoreTest(unittest.TestCase):
             project = get_project(session, project_id)
             self.assertIsNotNone(project)
             assert project is not None
+            self.assertEqual(project.active_version_id, v1_id)
             delete_project(session, project)
 
         with get_session() as session:
             self.assertIsNone(get_project(session, project_id))
             self.assertFalse(any(p.id == project_id for p in list_projects(session)))
             from sqlalchemy import select
-            from src.models import Project
+            from src.models import Project, ProjectVersion
+
             raw_p = session.scalar(select(Project).where(Project.id == project_id))
             self.assertIsNotNone(raw_p)
             assert raw_p is not None
             self.assertIsNotNone(raw_p.deleted_at)
-            # Versions of soft-deleted project are unchanged (still have deleted_at from version delete only)
-            raw_v = session.scalar(select(ProjectVersion).where(ProjectVersion.id == version_id))
-            self.assertIsNotNone(raw_v)
 
-            # Slug reusable after soft delete
             again = create_project(session, name="Soft Again", slug=slug, **payload)
             self.assertEqual(again.slug, slug)
             delete_project(session, again)
+
+    def test_delete_active_version_activates_newest_remaining(self) -> None:
+        suffix = uuid.uuid4().hex[:8]
+        payload = {
+            "data": {"meta": {"title": "a"}},
+            "template_tz": "# tz",
+            "template_pz": "# pz",
+            "style_profile": "page:\n  size: A4\n",
+        }
+        with get_session() as session:
+            project = create_project(
+                session, name="Del Active", slug=f"del-act-{suffix}", **payload
+            )
+            project_id = project.id
+            first_id = project.active_version_id
+            assert first_id is not None
+            second = create_version(
+                session,
+                project,
+                label="second",
+                data={"meta": {"title": "b"}},
+                activate=True,
+            )
+            second_id = second.id
+            self.assertEqual(project.active_version_id, second_id)
+            delete_version(session, second)
+            self.assertEqual(project.active_version_id, first_id)
+            self.assertEqual(project.data["meta"]["title"], "a")
+            delete_project(session, project)
+            _ = project_id
 
     def test_create_auto_slug_appends_suffix_on_collision(self) -> None:
         base_name = f"Auto Slug {uuid.uuid4().hex[:8]}"

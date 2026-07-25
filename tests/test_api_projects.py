@@ -49,11 +49,14 @@ class ApiProjectsTest(unittest.TestCase):
         self.assertIn("style_profile", body)
         self.assertIn("created_at", body)
         self.assertIn("updated_at", body)
+        self.assertIsNotNone(body.get("active_version_id"))
+        initial_version_id = body["active_version_id"]
 
         got = self.client.get(f"/api/projects/{project_id}")
         self.assertEqual(got.status_code, 200)
         self.assertEqual(got.json()["id"], project_id)
         self.assertEqual(got.json()["slug"], slug)
+        self.assertEqual(got.json()["active_version_id"], initial_version_id)
 
         listed = self.client.get("/api/projects")
         self.assertEqual(listed.status_code, 200)
@@ -80,21 +83,24 @@ class ApiProjectsTest(unittest.TestCase):
         self.assertEqual(versions0.status_code, 200)
         self.assertEqual(len(versions0.json()), 1)
         self.assertEqual(versions0.json()[0]["label"], "Начальная")
+        self.assertIn("updated_at", versions0.json()[0])
 
-        # Second PUT must not create another auto-version while one already exists.
+        # Second PUT must not create another version.
         put1b = self.client.put(f"/api/projects/{project_id}", json={"data": data_v1})
         self.assertEqual(put1b.status_code, 200, put1b.text)
         versions0b = self.client.get(f"/api/projects/{project_id}/versions")
         self.assertEqual(len(versions0b.json()), 1)
 
+        # Snapshot without activating so later PUT mutates only the active version.
         ver = self.client.post(
             f"/api/projects/{project_id}/versions",
-            json={"label": "checkpoint-1", "note": "after v1"},
+            json={"label": "checkpoint-1", "note": "after v1", "activate": False},
         )
         self.assertEqual(ver.status_code, 200, ver.text)
         version_id = ver.json()["id"]
         self.assertEqual(ver.json()["label"], "checkpoint-1")
         self.assertIn("created_at", ver.json())
+        self.assertEqual(ver.json()["data"]["meta"]["title"], "v1")
 
         data_v2 = {**data_v1, "meta": {**data_v1["meta"], "title": "v2"}}
         put2 = self.client.put(f"/api/projects/{project_id}", json={"data": data_v2})
@@ -103,9 +109,37 @@ class ApiProjectsTest(unittest.TestCase):
         versions_after_put2 = self.client.get(f"/api/projects/{project_id}/versions")
         self.assertEqual(len(versions_after_put2.json()), 2)
 
-        restore = self.client.post(f"/api/projects/{project_id}/versions/{version_id}/restore")
+        got_snap = self.client.get(f"/api/projects/{project_id}/versions/{version_id}")
+        self.assertEqual(got_snap.status_code, 200)
+        self.assertEqual(got_snap.json()["data"]["meta"]["title"], "v1")
+
+        activate = self.client.post(
+            f"/api/projects/{project_id}/versions/{version_id}/activate"
+        )
+        self.assertEqual(activate.status_code, 200, activate.text)
+        self.assertEqual(activate.json()["data"]["meta"]["title"], "v1")
+        self.assertEqual(activate.json()["active_version_id"], version_id)
+
+        # Mutate active version via PUT version; mirror updates too.
+        put_ver = self.client.put(
+            f"/api/projects/{project_id}/versions/{version_id}",
+            json={
+                "data": {**data_v1, "meta": {**data_v1["meta"], "title": "v1-edited"}},
+                "template_tz": "## edited\n",
+            },
+        )
+        self.assertEqual(put_ver.status_code, 200, put_ver.text)
+        self.assertEqual(put_ver.json()["data"]["meta"]["title"], "v1-edited")
+        got_after = self.client.get(f"/api/projects/{project_id}")
+        self.assertEqual(got_after.json()["data"]["meta"]["title"], "v1-edited")
+        self.assertEqual(got_after.json()["template_tz"], "## edited\n")
+
+        restore = self.client.post(
+            f"/api/projects/{project_id}/versions/{initial_version_id}/restore"
+        )
         self.assertEqual(restore.status_code, 200, restore.text)
-        self.assertEqual(restore.json()["data"]["meta"]["title"], "v1")
+        self.assertEqual(restore.json()["active_version_id"], initial_version_id)
+        self.assertEqual(restore.json()["data"]["meta"]["title"], "v2")
 
         # Ensure renderable templates for DOCX smoke (seed templates may need system.*)
         renderable = {
@@ -220,9 +254,10 @@ class ApiProjectsTest(unittest.TestCase):
         # Do not _track for final assert on slug reuse cleanup path — track then untrack after delete
         self._track(project_id)
 
+        # Create an extra version (activate=False), then soft-delete it.
         ver = self.client.post(
             f"/api/projects/{project_id}/versions",
-            json={"label": "v1"},
+            json={"label": "extra", "activate": False},
         )
         self.assertEqual(ver.status_code, 200, ver.text)
         version_id = ver.json()["id"]
@@ -231,11 +266,13 @@ class ApiProjectsTest(unittest.TestCase):
             f"/api/projects/{project_id}/versions/{version_id}"
         )
         self.assertEqual(deleted_v.status_code, 200)
-        self.assertEqual(deleted_v.json(), {"ok": True})
+        self.assertTrue(deleted_v.json()["ok"])
+        self.assertIsNotNone(deleted_v.json().get("active_version_id"))
 
         listed = self.client.get(f"/api/projects/{project_id}/versions")
         self.assertEqual(listed.status_code, 200)
-        self.assertEqual(listed.json(), [])
+        self.assertEqual(len(listed.json()), 1)
+        self.assertEqual(listed.json()[0]["label"], "Начальная")
 
         again_v = self.client.delete(
             f"/api/projects/{project_id}/versions/{version_id}"

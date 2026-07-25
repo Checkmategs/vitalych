@@ -25,6 +25,7 @@ if str(ROOT) not in sys.path:
 from src.db import get_engine, get_session
 from src.project_store import (
     SlugConflictError,
+    activate_version,
     create_project,
     create_version,
     delete_project,
@@ -34,8 +35,8 @@ from src.project_store import (
     list_projects,
     list_versions,
     load_seed_assets,
-    restore_version,
     update_project,
+    update_version,
 )
 from src.render import parse_formats, render_document_content, selected_keys
 from src.style_profile import load_style_profile_text
@@ -61,6 +62,20 @@ class ProjectPutBody(BaseModel):
 
 
 class VersionCreateBody(BaseModel):
+    label: str | None = None
+    note: str | None = None
+    data: dict[str, Any] | None = None
+    template_tz: str | None = None
+    template_pz: str | None = None
+    style_profile: str | None = None
+    activate: bool = True
+
+
+class VersionPutBody(BaseModel):
+    data: dict[str, Any]
+    template_tz: str | None = None
+    template_pz: str | None = None
+    style_profile: str | None = None
     label: str | None = None
     note: str | None = None
 
@@ -108,6 +123,7 @@ def _project_full(project: Any) -> dict[str, Any]:
         "template_tz": project.template_tz,
         "template_pz": project.template_pz,
         "style_profile": project.style_profile,
+        "active_version_id": str(project.active_version_id) if project.active_version_id else None,
         "created_at": _iso(project.created_at),
         "updated_at": _iso(project.updated_at),
     }
@@ -119,6 +135,17 @@ def _version_item(version: Any) -> dict[str, Any]:
         "label": version.label,
         "note": version.note,
         "created_at": _iso(version.created_at),
+        "updated_at": _iso(version.updated_at),
+    }
+
+
+def _version_full(version: Any) -> dict[str, Any]:
+    return {
+        **_version_item(version),
+        "data": version.data,
+        "template_tz": version.template_tz,
+        "template_pz": version.template_pz,
+        "style_profile": version.style_profile,
     }
 
 
@@ -211,8 +238,6 @@ def api_put_project(project_id: uuid.UUID, body: ProjectPutBody) -> dict[str, An
             if body.name is not None:
                 kwargs["name"] = body.name
             update_project(session, project, **kwargs)
-            if not list_versions(session, project_id):
-                create_version(session, project, label="Начальная")
             return _project_full(project)
     except HTTPException:
         raise
@@ -246,12 +271,94 @@ def api_list_versions(project_id: uuid.UUID) -> list[dict[str, Any]]:
 
 
 @app.post("/api/projects/{project_id}/versions")
-def api_create_version(project_id: uuid.UUID, body: VersionCreateBody = VersionCreateBody()) -> dict[str, Any]:
+def api_create_version(
+    project_id: uuid.UUID, body: VersionCreateBody = VersionCreateBody()
+) -> dict[str, Any]:
     try:
         with get_session() as session:
             project = _require_project(session, project_id)
-            version = create_version(session, project, label=body.label, note=body.note)
-            return _version_item(version)
+            version = create_version(
+                session,
+                project,
+                label=body.label,
+                note=body.note,
+                data=body.data,
+                template_tz=body.template_tz,
+                template_pz=body.template_pz,
+                style_profile=body.style_profile,
+                activate=body.activate,
+            )
+            return _version_full(version)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.get("/api/projects/{project_id}/versions/{version_id}")
+def api_get_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, Any]:
+    try:
+        with get_session() as session:
+            _require_project(session, project_id)
+            version = get_version(session, project_id, version_id)
+            if version is None:
+                raise HTTPException(status_code=404, detail="Version not found")
+            return _version_full(version)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.put("/api/projects/{project_id}/versions/{version_id}")
+def api_put_version(
+    project_id: uuid.UUID, version_id: uuid.UUID, body: VersionPutBody
+) -> dict[str, Any]:
+    try:
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            version = get_version(session, project_id, version_id)
+            if version is None:
+                raise HTTPException(status_code=404, detail="Version not found")
+            kwargs: dict[str, Any] = {"data": body.data}
+            if body.template_tz is not None:
+                kwargs["template_tz"] = body.template_tz
+            if body.template_pz is not None:
+                kwargs["template_pz"] = body.template_pz
+            if body.style_profile is not None:
+                kwargs["style_profile"] = body.style_profile
+            if body.label is not None:
+                kwargs["label"] = body.label
+            if body.note is not None:
+                kwargs["note"] = body.note
+            update_version(session, version, **kwargs)
+            if project.active_version_id == version.id:
+                update_project(
+                    session,
+                    project,
+                    data=version.data,
+                    template_tz=version.template_tz,
+                    template_pz=version.template_pz,
+                    style_profile=version.style_profile,
+                    mirror_active_version=False,
+                )
+            return _version_full(version)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.post("/api/projects/{project_id}/versions/{version_id}/activate")
+def api_activate_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, Any]:
+    try:
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            version = get_version(session, project_id, version_id)
+            if version is None:
+                raise HTTPException(status_code=404, detail="Version not found")
+            activate_version(session, project, version)
+            return _project_full(project)
     except HTTPException:
         raise
     except (SQLAlchemyError, OSError) as e:
@@ -260,30 +367,26 @@ def api_create_version(project_id: uuid.UUID, body: VersionCreateBody = VersionC
 
 @app.post("/api/projects/{project_id}/versions/{version_id}/restore")
 def api_restore_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, Any]:
+    """Alias of activate for compatibility."""
+    return api_activate_version(project_id, version_id)
+
+
+@app.delete("/api/projects/{project_id}/versions/{version_id}")
+def api_delete_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, Any]:
     try:
         with get_session() as session:
             project = _require_project(session, project_id)
             version = get_version(session, project_id, version_id)
             if version is None:
                 raise HTTPException(status_code=404, detail="Version not found")
-            restore_version(session, project, version)
-            return _project_full(project)
-    except HTTPException:
-        raise
-    except (SQLAlchemyError, OSError) as e:
-        raise HTTPException(status_code=503, detail="Database unavailable") from e
-
-
-@app.delete("/api/projects/{project_id}/versions/{version_id}")
-def api_delete_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, bool]:
-    try:
-        with get_session() as session:
-            _require_project(session, project_id)
-            version = get_version(session, project_id, version_id)
-            if version is None:
-                raise HTTPException(status_code=404, detail="Version not found")
             delete_version(session, version)
-            return {"ok": True}
+            session.refresh(project)
+            return {
+                "ok": True,
+                "active_version_id": (
+                    str(project.active_version_id) if project.active_version_id else None
+                ),
+            }
     except HTTPException:
         raise
     except (SQLAlchemyError, OSError) as e:

@@ -31,6 +31,11 @@ class Project(Base):
     template_tz: Mapped[str] = mapped_column(Text, nullable=False)
     template_pz: Mapped[str] = mapped_column(Text, nullable=False)
     style_profile: Mapped[str] = mapped_column(Text, nullable=False)
+    active_version_id: Mapped[Optional[uuid.UUID]] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("project_versions.id", ondelete="SET NULL", use_alter=True, name="fk_projects_active_version_id"),
+        nullable=True,
+    )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
@@ -51,6 +56,7 @@ class Project(Base):
         back_populates="project",
         cascade="all, delete-orphan",
         passive_deletes=True,
+        foreign_keys="ProjectVersion.project_id",
     )
 
 
@@ -81,5 +87,14 @@ class ProjectVersion(Base):
         nullable=False,
         server_default=func.now(),
     )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+        onupdate=func.now(),
+    )
 
-    project: Mapped[Project] = relationship(back_populates="versions")
+    project: Mapped[Project] = relationship(
+        back_populates="versions",
+        foreign_keys=[project_id],
+    )

@@ -87,6 +87,21 @@ def create_project(
     )
     session.add(project)
     session.flush()
+
+    version = ProjectVersion(
+        project_id=project.id,
+        label="Начальная",
+        note=None,
+        data=copy.deepcopy(data),
+        template_tz=template_tz,
+        template_pz=template_pz,
+        style_profile=style_profile,
+    )
+    session.add(version)
+    session.flush()
+    project.active_version_id = version.id
+    session.add(project)
+    session.flush()
     return project
 
 
@@ -112,6 +127,7 @@ def update_project(
     template_pz: Any = _UNSET,
     style_profile: Any = _UNSET,
     name: Any = _UNSET,
+    mirror_active_version: bool = True,
 ) -> Project:
     if data is not _UNSET:
         project.data = copy.deepcopy(data)
@@ -126,6 +142,18 @@ def update_project(
     project.updated_at = datetime.now(timezone.utc)
     session.add(project)
     session.flush()
+
+    if mirror_active_version and project.active_version_id is not None:
+        version = get_version(session, project.id, project.active_version_id)
+        if version is not None:
+            update_version(
+                session,
+                version,
+                data=project.data,
+                template_tz=project.template_tz,
+                template_pz=project.template_pz,
+                style_profile=project.style_profile,
+            )
     return project
 
 
@@ -141,18 +169,25 @@ def create_version(
     *,
     label: str | None = None,
     note: str | None = None,
+    data: dict[str, Any] | None = None,
+    template_tz: str | None = None,
+    template_pz: str | None = None,
+    style_profile: str | None = None,
+    activate: bool = False,
 ) -> ProjectVersion:
     version = ProjectVersion(
         project_id=project.id,
         label=label,
         note=note,
-        data=copy.deepcopy(project.data),
-        template_tz=project.template_tz,
-        template_pz=project.template_pz,
-        style_profile=project.style_profile,
+        data=copy.deepcopy(data if data is not None else project.data),
+        template_tz=template_tz if template_tz is not None else project.template_tz,
+        template_pz=template_pz if template_pz is not None else project.template_pz,
+        style_profile=style_profile if style_profile is not None else project.style_profile,
     )
     session.add(version)
     session.flush()
+    if activate:
+        activate_version(session, project, version)
     return version
 
 
@@ -181,21 +216,65 @@ def get_version(
     )
 
 
+def update_version(
+    session: Session,
+    version: ProjectVersion,
+    *,
+    data: Any = _UNSET,
+    template_tz: Any = _UNSET,
+    template_pz: Any = _UNSET,
+    style_profile: Any = _UNSET,
+    label: Any = _UNSET,
+    note: Any = _UNSET,
+) -> ProjectVersion:
+    if data is not _UNSET:
+        version.data = copy.deepcopy(data)
+    if template_tz is not _UNSET:
+        version.template_tz = template_tz
+    if template_pz is not _UNSET:
+        version.template_pz = template_pz
+    if style_profile is not _UNSET:
+        version.style_profile = style_profile
+    if label is not _UNSET:
+        version.label = label
+    if note is not _UNSET:
+        version.note = note
+    version.updated_at = datetime.now(timezone.utc)
+    session.add(version)
+    session.flush()
+    return version
+
+
 def delete_version(session: Session, version: ProjectVersion) -> None:
+    project = session.get(Project, version.project_id)
     version.deleted_at = datetime.now(timezone.utc)
     session.add(version)
     session.flush()
+    if project is not None and project.active_version_id == version.id:
+        remaining = list_versions(session, version.project_id)
+        if remaining:
+            activate_version(session, project, remaining[0])
+        else:
+            project.active_version_id = None
+            session.add(project)
+            session.flush()
 
 
-def restore_version(session: Session, project: Project, version: ProjectVersion) -> Project:
+def activate_version(session: Session, project: Project, version: ProjectVersion) -> Project:
     project.data = copy.deepcopy(version.data)
     project.template_tz = version.template_tz
     project.template_pz = version.template_pz
     project.style_profile = version.style_profile
+    project.active_version_id = version.id
     project.updated_at = datetime.now(timezone.utc)
     session.add(project)
     session.flush()
     return project
+
+
+def restore_version(session: Session, project: Project, version: ProjectVersion) -> Project:
+    """Alias of activate_version for API compatibility."""
+    return activate_version(session, project, version)
 
 
 def load_seed_assets(root: Path) -> tuple[dict[str, Any], str, str, str]:

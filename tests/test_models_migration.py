@@ -61,3 +61,38 @@ class ModelsMigrationTest(unittest.TestCase):
             self.assertIsNotNone(version)
             assert version is not None
             self.assertIsNotNone(version.deleted_at)
+            self.assertIsNotNone(version.updated_at)
+
+    def test_active_version_id_column(self) -> None:
+        pid = uuid.uuid4()
+        vid = uuid.uuid4()
+        with get_session() as s:
+            s.add(Project(
+                id=pid,
+                slug=f"av-{pid.hex[:8]}",
+                name="Active",
+                data={"meta": {"title": "x"}},
+                template_tz="# tz",
+                template_pz="# pz",
+                style_profile="page:\n  size: A4\n",
+            ))
+            s.flush()
+            s.add(ProjectVersion(
+                id=vid,
+                project_id=pid,
+                label="v1",
+                note=None,
+                data={"meta": {"title": "x"}},
+                template_tz="# tz",
+                template_pz="# pz",
+                style_profile="page:\n  size: A4\n",
+            ))
+            s.flush()
+            project = s.get(Project, pid)
+            assert project is not None
+            project.active_version_id = vid
+        with get_session() as s:
+            project = s.get(Project, pid)
+            self.assertIsNotNone(project)
+            assert project is not None
+            self.assertEqual(project.active_version_id, vid)
