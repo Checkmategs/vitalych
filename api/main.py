@@ -1,44 +1,65 @@
-"""FastAPI backend: project YAML, templates, and document render."""
+"""FastAPI backend: Postgres projects, versions, and document render."""
 
 from __future__ import annotations
 
 import sys
+import uuid
+from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
-import yaml
 from jinja2 import TemplateNotFound, UndefinedError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse
+from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
+from sqlalchemy import text
+from sqlalchemy.exc import SQLAlchemyError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from src.render import TEMPLATE_MAP, load_data, parse_formats, render_document, selected_keys
+from src.db import get_engine, get_session
+from src.project_store import (
+    SlugConflictError,
+    create_project,
+    create_version,
+    delete_project,
+    get_project,
+    list_projects,
+    list_versions,
+    load_seed_assets,
+    restore_version,
+    update_project,
+)
+from src.render import parse_formats, render_document_content, selected_keys
+from src.style_profile import load_style_profile_text
 
-DATA_DIR = ROOT / "data"
-PROJECT_YAML = DATA_DIR / "project.yaml"
-EXAMPLE_YAML = DATA_DIR / "project.example.yaml"
-TEMPLATES_DIR = ROOT / "templates"
 OUT_DIR = ROOT / "out"
-STYLE_PROFILE = ROOT / "style-profile.yaml"
 DIST_DIR = ROOT / "web" / "dist"
 
-TemplateKey = Literal["tz", "pz"]
 RenderTemplate = Literal["tz", "pz", "all"]
 RenderFormat = Literal["md", "docx", "both"]
 
 
+class ProjectCreateBody(BaseModel):
+    name: str
+    slug: str | None = None
+
+
 class ProjectPutBody(BaseModel):
     data: dict[str, Any]
+    template_tz: str | None = None
+    template_pz: str | None = None
+    style_profile: str | None = None
+    name: str | None = None
 
 
-class TemplatePutBody(BaseModel):
-    content: str
+class VersionCreateBody(BaseModel):
+    label: str | None = None
+    note: str | None = None
 
 
 class RenderBody(BaseModel):
@@ -62,112 +83,250 @@ app.add_middleware(
 )
 
 
-def default_data_path() -> Path:
-    return PROJECT_YAML if PROJECT_YAML.is_file() else EXAMPLE_YAML
+def _iso(dt: datetime) -> str:
+    return dt.isoformat()
 
 
-def save_yaml(path: Path, data: dict) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
-    with path.open("w", encoding="utf-8") as f:
-        yaml.safe_dump(
-            data,
-            f,
-            allow_unicode=True,
-            sort_keys=False,
-            default_flow_style=False,
-        )
+def _project_summary(project: Any) -> dict[str, Any]:
+    return {
+        "id": str(project.id),
+        "slug": project.slug,
+        "name": project.name,
+        "updated_at": _iso(project.updated_at),
+    }
 
 
-def template_path(key: str) -> Path:
-    if key not in TEMPLATE_MAP:
-        raise HTTPException(status_code=404, detail=f"Unknown template key: {key}")
-    j2_name, _ = TEMPLATE_MAP[key]
-    return TEMPLATES_DIR / j2_name
+def _project_full(project: Any) -> dict[str, Any]:
+    return {
+        "id": str(project.id),
+        "slug": project.slug,
+        "name": project.name,
+        "data": project.data,
+        "template_tz": project.template_tz,
+        "template_pz": project.template_pz,
+        "style_profile": project.style_profile,
+        "created_at": _iso(project.created_at),
+        "updated_at": _iso(project.updated_at),
+    }
 
 
-@app.get("/api/health")
-def health() -> dict[str, bool]:
-    return {"ok": True}
+def _version_item(version: Any) -> dict[str, Any]:
+    return {
+        "id": str(version.id),
+        "label": version.label,
+        "note": version.note,
+        "created_at": _iso(version.created_at),
+    }
 
 
-@app.get("/api/project")
-def get_project() -> dict[str, Any]:
-    path = default_data_path()
+def _db_up() -> bool:
     try:
-        return load_data(path)
-    except FileNotFoundError as e:
-        raise HTTPException(status_code=404, detail=str(e)) from e
-    except (ValueError, yaml.YAMLError) as e:
+        with get_engine().connect() as conn:
+            conn.execute(text("SELECT 1"))
+        return True
+    except Exception:
+        return False
+
+
+def _require_project(session: Any, project_id: uuid.UUID) -> Any:
+    project = get_project(session, project_id)
+    if project is None:
+        raise HTTPException(status_code=404, detail="Project not found")
+    return project
+
+
+@app.get("/api/health", response_model=None)
+def health() -> dict[str, bool] | JSONResponse:
+    db_ok = _db_up()
+    body = {"ok": True, "db": db_ok}
+    if not db_ok:
+        return JSONResponse(status_code=503, content=body)
+    return body
+
+
+@app.get("/api/projects")
+def api_list_projects() -> list[dict[str, Any]]:
+    try:
+        with get_session() as session:
+            return [_project_summary(p) for p in list_projects(session)]
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.post("/api/projects")
+def api_create_project(body: ProjectCreateBody) -> dict[str, Any]:
+    try:
+        data, template_tz, template_pz, style_profile = load_seed_assets(ROOT)
+        with get_session() as session:
+            project = create_project(
+                session,
+                name=body.name,
+                slug=body.slug,
+                data=data,
+                template_tz=template_tz,
+                template_pz=template_pz,
+                style_profile=style_profile,
+            )
+            session.flush()
+            return _project_full(project)
+    except SlugConflictError as e:
+        raise HTTPException(status_code=409, detail=str(e)) from e
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+    except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@app.put("/api/project")
-def put_project(body: ProjectPutBody) -> dict[str, Any]:
+@app.get("/api/projects/{project_id}")
+def api_get_project(project_id: uuid.UUID) -> dict[str, Any]:
     try:
-        save_yaml(PROJECT_YAML, body.data)
-        return load_data(PROJECT_YAML)
-    except (OSError, ValueError, yaml.YAMLError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            return _project_full(project)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
 
 
-@app.get("/api/template/{key}")
-def get_template(key: TemplateKey) -> dict[str, str]:
-    path = template_path(key)
-    if not path.is_file():
-        raise HTTPException(status_code=404, detail=f"Template not found: {path}")
-    return {"key": key, "content": path.read_text(encoding="utf-8")}
-
-
-@app.put("/api/template/{key}")
-def put_template(key: TemplateKey, body: TemplatePutBody) -> dict[str, str]:
-    path = template_path(key)
+@app.put("/api/projects/{project_id}")
+def api_put_project(project_id: uuid.UUID, body: ProjectPutBody) -> dict[str, Any]:
     try:
-        path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_text(body.content, encoding="utf-8")
-    except OSError as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
-    return {"key": key, "content": path.read_text(encoding="utf-8")}
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            kwargs: dict[str, Any] = {"data": body.data}
+            if body.template_tz is not None:
+                kwargs["template_tz"] = body.template_tz
+            if body.template_pz is not None:
+                kwargs["template_pz"] = body.template_pz
+            if body.style_profile is not None:
+                kwargs["style_profile"] = body.style_profile
+            if body.name is not None:
+                kwargs["name"] = body.name
+            update_project(session, project, **kwargs)
+            return _project_full(project)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
 
 
-@app.post("/api/render")
-def render(body: RenderBody = RenderBody()) -> dict[str, list[str]]:
+@app.delete("/api/projects/{project_id}")
+def api_delete_project(project_id: uuid.UUID) -> dict[str, bool]:
     try:
-        data = load_data(default_data_path())
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            delete_project(session, project)
+            return {"ok": True}
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.get("/api/projects/{project_id}/versions")
+def api_list_versions(project_id: uuid.UUID) -> list[dict[str, Any]]:
+    try:
+        with get_session() as session:
+            _require_project(session, project_id)
+            return [_version_item(v) for v in list_versions(session, project_id)]
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.post("/api/projects/{project_id}/versions")
+def api_create_version(project_id: uuid.UUID, body: VersionCreateBody = VersionCreateBody()) -> dict[str, Any]:
+    try:
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            version = create_version(session, project, label=body.label, note=body.note)
+            return _version_item(version)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.post("/api/projects/{project_id}/versions/{version_id}/restore")
+def api_restore_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, Any]:
+    try:
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            versions = {v.id: v for v in list_versions(session, project_id)}
+            version = versions.get(version_id)
+            if version is None:
+                raise HTTPException(status_code=404, detail="Version not found")
+            restore_version(session, project, version)
+            return _project_full(project)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.post("/api/projects/{project_id}/render")
+def api_render(project_id: uuid.UUID, body: RenderBody = RenderBody()) -> dict[str, list[str]]:
+    try:
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            slug = project.slug
+            data = project.data
+            template_tz = project.template_tz
+            template_pz = project.template_pz
+            style_profile_text = project.style_profile
+
         formats = parse_formats(body.format)
         profile = None
         if "docx" in formats:
-            from src.style_profile import load_style_profile
+            profile = load_style_profile_text(style_profile_text)
 
-            profile = load_style_profile(STYLE_PROFILE)
+        out_dir = OUT_DIR / slug
         written: list[Path] = []
         for key in selected_keys(body.template):
             written.extend(
-                render_document(
+                render_document_content(
                     key,
                     data,
-                    TEMPLATES_DIR,
-                    OUT_DIR,
+                    template_tz,
+                    template_pz,
+                    out_dir,
                     formats,
                     style_profile=profile,
-                    style_profile_path=STYLE_PROFILE,
+                    style_profile_text=style_profile_text,
                 )
             )
         return {"written": [str(p.relative_to(ROOT)) for p in written]}
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except (ValueError, yaml.YAMLError, OSError, UndefinedError, TemplateNotFound) as e:
+    except (ValueError, UndefinedError, TemplateNotFound) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
-@app.get("/api/download/{filename}")
-def download_docx(filename: str) -> FileResponse:
-    """Serve a generated .docx from out/ (no path traversal, docx only)."""
+@app.get("/api/projects/{project_id}/download/{filename}")
+def api_download(project_id: uuid.UUID, filename: str) -> FileResponse:
+    """Serve a generated .docx from out/{slug}/ (no path traversal, docx only)."""
     name = Path(filename).name
     if name != filename or not name.endswith(".docx") or ".." in filename:
-        raise HTTPException(status_code=400, detail="Only .docx filenames in out/ are allowed")
-    path = (OUT_DIR / name).resolve()
+        raise HTTPException(status_code=400, detail="Only .docx filenames are allowed")
     try:
-        path.relative_to(OUT_DIR.resolve())
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            slug = project.slug
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+    base = (OUT_DIR / slug).resolve()
+    path = (base / name).resolve()
+    try:
+        path.relative_to(base)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid path") from e
     if not path.is_file():
