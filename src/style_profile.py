@@ -17,14 +17,18 @@ ALIGN_MAP = {
 }
 
 
+def load_style_profile_text(text: str) -> dict:
+    data = yaml.safe_load(text)
+    if not isinstance(data, dict):
+        raise ValueError(f"Style profile root must be a mapping, got {type(data).__name__}")
+    return data
+
+
 def load_style_profile(path: Path) -> dict:
     if not path.is_file():
         raise FileNotFoundError(f"Style profile not found: {path}")
     with path.open(encoding="utf-8") as f:
-        data = yaml.safe_load(f)
-    if not isinstance(data, dict):
-        raise ValueError(f"Style profile root must be a mapping, got {type(data).__name__}")
-    return data
+        return load_style_profile_text(f.read())
 
 
 def cm(value: float | int | None) -> Cm | None:
