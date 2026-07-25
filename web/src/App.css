@@ -29,11 +29,24 @@
 }
 
 .mh-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
   font-weight: 600;
   font-size: 14px;
   letter-spacing: 0.02em;
   color: var(--text);
   white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.mh-brand-logo {
+  display: block;
+  width: 22px;
+  height: 22px;
+  border-radius: 50%;
+  object-fit: cover;
+  flex-shrink: 0;
 }
 
 .mh-seg {
@@ -440,8 +453,12 @@
 }
 
 .panel-title {
+  display: flex;
+  align-items: center;
   flex-shrink: 0;
-  padding: 10px 12px 8px;
+  height: 33px;
+  padding: 0 12px;
+  box-sizing: border-box;
   font-size: 11px;
   font-weight: 600;
   text-transform: uppercase;
@@ -1143,18 +1160,20 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 4px 8px;
+  height: 33px;
+  padding: 0 8px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-panel);
   flex-shrink: 0;
+  box-sizing: border-box;
 }
 
 .editor-toolbar button {
   border: 1px solid transparent;
   background: transparent;
   border-radius: 3px;
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   font-size: 13px;
   color: var(--text);
   display: inline-flex;
@@ -1165,6 +1184,10 @@
 .editor-toolbar button:hover {
   background: #fff;
   border-color: var(--border);
+}
+
+.editor-toolbar button.editor-toolbar-btn-wide {
+  width: 48px;
 }
 
 .toolbar-sep {

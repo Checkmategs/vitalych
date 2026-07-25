@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import logoUrl from '../assets/logo.png'
 import {
   IconDownload,
   IconPlus,
@@ -95,7 +96,10 @@ export function MainHeader({
   return (
     <header className="main-header">
       <div className="mh-left">
-        <div className="mh-brand">Vitalych</div>
+        <div className="mh-brand">
+          <img className="mh-brand-logo" src={logoUrl} alt="" width={22} height={22} />
+          <span>Vitalych</span>
+        </div>
         <div className="mh-seg" role="group" aria-label="Тип документа">
           <button
             type="button"
