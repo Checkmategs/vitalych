@@ -4,13 +4,16 @@ from __future__ import annotations
 
 import argparse
 import sys
+import uuid
 from pathlib import Path
 
 import yaml
-from jinja2 import Environment, FileSystemLoader, StrictUndefined, TemplateNotFound, UndefinedError
+from jinja2 import DictLoader, Environment, FileSystemLoader, StrictUndefined, TemplateNotFound, UndefinedError
 
+from src.db import get_session
 from src.md_to_docx import markdown_to_docx
-from src.style_profile import load_style_profile
+from src.project_store import get_project, get_project_by_slug
+from src.style_profile import load_style_profile, load_style_profile_text
 
 TEMPLATE_MAP = {
     "tz": ("tz.md.j2", "tz"),
@@ -36,6 +39,39 @@ def parse_formats(format_name: str) -> set[str]:
     raise ValueError(f"Unknown format: {format_name}")
 
 
+def _write_rendered(
+    template_key: str,
+    text: str,
+    out_dir: Path,
+    formats: set[str],
+    style_profile: dict | None,
+    style_profile_path: Path | None,
+    style_profile_text: str | None,
+) -> list[Path]:
+    _, stem = TEMPLATE_MAP[template_key]
+    out_dir.mkdir(parents=True, exist_ok=True)
+    written: list[Path] = []
+    if "md" in formats:
+        md_path = out_dir / f"{stem}.md"
+        md_path.write_text(text, encoding="utf-8")
+        written.append(md_path)
+    if "docx" in formats:
+        if style_profile is None:
+            if style_profile_text is not None:
+                style_profile = load_style_profile_text(style_profile_text)
+            elif style_profile_path is not None:
+                style_profile = load_style_profile(style_profile_path)
+            else:
+                raise FileNotFoundError(
+                    "DOCX requires a style profile; pass style_profile, "
+                    "style_profile_text, or style_profile_path"
+                )
+        docx_path = out_dir / f"{stem}.docx"
+        markdown_to_docx(text, docx_path, profile=style_profile)
+        written.append(docx_path)
+    return written
+
+
 def render_document(
     template_key: str,
     data: dict,
@@ -48,7 +84,7 @@ def render_document(
     if template_key not in TEMPLATE_MAP:
         raise ValueError(f"Unknown template: {template_key}")
     formats = formats or {"md", "docx"}
-    j2_name, stem = TEMPLATE_MAP[template_key]
+    j2_name, _stem = TEMPLATE_MAP[template_key]
     j2_path = templates_dir / j2_name
     if not j2_path.is_file():
         raise FileNotFoundError(f"Template not found: {j2_path}")
@@ -60,25 +96,47 @@ def render_document(
         lstrip_blocks=True,
     )
     text = env.get_template(j2_name).render(**data)
-    out_dir.mkdir(parents=True, exist_ok=True)
+    return _write_rendered(
+        template_key,
+        text,
+        out_dir,
+        formats,
+        style_profile,
+        style_profile_path,
+        style_profile_text=None,
+    )
 
-    written: list[Path] = []
-    if "md" in formats:
-        md_path = out_dir / f"{stem}.md"
-        md_path.write_text(text, encoding="utf-8")
-        written.append(md_path)
-    if "docx" in formats:
-        if style_profile is None:
-            if style_profile_path is None:
-                raise FileNotFoundError(
-                    "DOCX requires a style profile; pass style_profile_path "
-                    "(default: style-profile.yaml)"
-                )
-            style_profile = load_style_profile(style_profile_path)
-        docx_path = out_dir / f"{stem}.docx"
-        markdown_to_docx(text, docx_path, profile=style_profile)
-        written.append(docx_path)
-    return written
+
+def render_document_content(
+    template_key: str,
+    data: dict,
+    template_tz: str,
+    template_pz: str,
+    out_dir: Path,
+    formats: set[str] | None = None,
+    style_profile: dict | None = None,
+    style_profile_text: str | None = None,
+) -> list[Path]:
+    if template_key not in TEMPLATE_MAP:
+        raise ValueError(f"Unknown template: {template_key}")
+    formats = formats or {"md", "docx"}
+    j2_name, _stem = TEMPLATE_MAP[template_key]
+    env = Environment(
+        loader=DictLoader({"tz.md.j2": template_tz, "pz.md.j2": template_pz}),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    text = env.get_template(j2_name).render(**data)
+    return _write_rendered(
+        template_key,
+        text,
+        out_dir,
+        formats,
+        style_profile,
+        style_profile_path=None,
+        style_profile_text=style_profile_text,
+    )
 
 
 def selected_keys(template: str) -> list[str]:
@@ -90,7 +148,7 @@ def selected_keys(template: str) -> list[str]:
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(
         prog="python -m src.render",
-        description="Render GOST ТЗ / ПЗ from a shared project YAML (Markdown and/or DOCX).",
+        description="Render GOST ТЗ / ПЗ from a shared project YAML or Postgres project.",
     )
     p.add_argument(
         "--template",
@@ -98,23 +156,34 @@ def build_parser() -> argparse.ArgumentParser:
         default="all",
         help="Which document(s) to render (default: all)",
     )
-    p.add_argument(
+    source = p.add_mutually_exclusive_group(required=True)
+    source.add_argument(
         "--data",
         type=Path,
-        required=True,
         help="Path to project YAML",
+    )
+    source.add_argument(
+        "--project",
+        metavar="SLUG",
+        help="Project slug in Postgres",
+    )
+    source.add_argument(
+        "--project-id",
+        type=uuid.UUID,
+        metavar="UUID",
+        help="Project UUID in Postgres",
     )
     p.add_argument(
         "--out",
         type=Path,
         default=Path("out"),
-        help="Output directory (default: out)",
+        help="Output directory (default: out; for DB projects: out/{slug})",
     )
     p.add_argument(
         "--templates-dir",
         type=Path,
         default=Path("templates"),
-        help="Templates directory (default: templates)",
+        help="Templates directory for --data mode (default: templates)",
     )
     p.add_argument(
         "--format",
@@ -126,7 +195,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--style-profile",
         type=Path,
         default=Path("style-profile.yaml"),
-        help="Path to DOCX style profile YAML (default: style-profile.yaml)",
+        help="Path to DOCX style profile YAML for --data mode (default: style-profile.yaml)",
     )
     return p
 
@@ -134,24 +203,54 @@ def build_parser() -> argparse.ArgumentParser:
 def main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
     try:
-        data = load_data(args.data)
         formats = parse_formats(args.format)
-        profile = None
-        if "docx" in formats:
-            profile = load_style_profile(args.style_profile)
         written: list[Path] = []
-        for key in selected_keys(args.template):
-            written.extend(
-                render_document(
-                    key,
-                    data,
-                    args.templates_dir,
-                    args.out,
-                    formats,
-                    style_profile=profile,
-                    style_profile_path=args.style_profile,
+
+        if args.data is not None:
+            data = load_data(args.data)
+            profile = None
+            if "docx" in formats:
+                profile = load_style_profile(args.style_profile)
+            for key in selected_keys(args.template):
+                written.extend(
+                    render_document(
+                        key,
+                        data,
+                        args.templates_dir,
+                        args.out,
+                        formats,
+                        style_profile=profile,
+                        style_profile_path=args.style_profile,
+                    )
                 )
-            )
+        else:
+            with get_session() as session:
+                if args.project is not None:
+                    project = get_project_by_slug(session, args.project)
+                    if project is None:
+                        raise ValueError(f"Project not found: slug={args.project}")
+                else:
+                    project = get_project(session, args.project_id)
+                    if project is None:
+                        raise ValueError(f"Project not found: id={args.project_id}")
+
+                out_dir = args.out
+                if out_dir == Path("out"):
+                    out_dir = Path("out") / project.slug
+
+                for key in selected_keys(args.template):
+                    written.extend(
+                        render_document_content(
+                            key,
+                            project.data,
+                            project.template_tz,
+                            project.template_pz,
+                            out_dir,
+                            formats,
+                            style_profile_text=project.style_profile,
+                        )
+                    )
+
         for path in written:
             print(path)
         return 0
