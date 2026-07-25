@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime
 from typing import Any, Optional
 
-from sqlalchemy import DateTime, ForeignKey, Index, Text, UniqueConstraint, func, text
+from sqlalchemy import DateTime, ForeignKey, Index, Text, func, text
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -15,7 +15,14 @@ class Base(DeclarativeBase):
 
 class Project(Base):
     __tablename__ = "projects"
-    __table_args__ = (UniqueConstraint("slug", name="uq_projects_slug"),)
+    __table_args__ = (
+        Index(
+            "uq_projects_slug_alive",
+            "slug",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+    )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     slug: Mapped[str] = mapped_column(Text, nullable=False)
@@ -24,6 +31,10 @@ class Project(Base):
     template_tz: Mapped[str] = mapped_column(Text, nullable=False)
     template_pz: Mapped[str] = mapped_column(Text, nullable=False)
     style_profile: Mapped[str] = mapped_column(Text, nullable=False)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
@@ -61,6 +72,10 @@ class ProjectVersion(Base):
     template_tz: Mapped[str] = mapped_column(Text, nullable=False)
     template_pz: Mapped[str] = mapped_column(Text, nullable=False)
     style_profile: Mapped[str] = mapped_column(Text, nullable=False)
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime(timezone=True),
+        nullable=True,
+    )
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
         nullable=False,
