@@ -1,64 +1,58 @@
 # Vitalych — шаблоны ТЗ и ПЗ по ГОСТ
 
-MVP генерации техдокументации: общие переменные YAML → Markdown / DOCX (ТЗ / ПЗ).
+MVP генерации техдокументации: проекты в PostgreSQL → Markdown / DOCX (ТЗ / ПЗ).
 
-## Этап A (готово)
-
-- `templates/tz.md.j2` — ТЗ по ГОСТ 34.602-2020 (10 разделов)
-- `templates/pz.md.j2` — ПЗ по ГОСТ Р 59795—2021 п. 5.2 (4 раздела)
-- `data/project.example.yaml` — единый набор переменных
-- Spec: `docs/superpowers/specs/2026-07-23-gost-templates-mvp-design.md`
-
-## Этап B (готово)
-
-CLI: YAML → `out/tz.md` + `out/tz.docx` (и то же для ПЗ).
+## Быстрый старт (локально)
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+cp .env.example .env   # при необходимости смените пароль и DATABASE_URL
 
+docker compose up -d
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+alembic upgrade head
+python scripts/seed_from_files.py   # no-op, если проекты уже есть
+
+# API + UI (dev)
+uvicorn api.main:app --reload --port 8010
+# в другом терминале:
+cd web && npm install && npm run dev
+```
+
+Откройте http://localhost:5173. Данные проектов хранятся в Postgres, не в `data/project.yaml`.
+
+### CLI
+
+Файл YAML (как раньше):
+
+```bash
 python -m src.render --template all --data data/project.example.yaml --out out/ --format both
 ```
 
-Флаги:
-
-- `--template tz|pz|all` (по умолчанию `all`)
-- `--data` — путь к YAML (обязательный)
-- `--out` — каталог вывода (по умолчанию `out`)
-- `--templates-dir` — каталог шаблонов (по умолчанию `templates`)
-- `--format md|docx|both` (по умолчанию `both`)
-- `--style-profile` — YAML оформления DOCX (по умолчанию `style-profile.yaml`)
-
-Оформление `.docx` берётся из [`style-profile.yaml`](style-profile.yaml) (поля A4, Times New Roman 12 pt, отступы, заголовки, таблицы, номер страницы).
-
-Свой проект: скопируйте `data/project.example.yaml` → `data/project.yaml`, заполните, затем:
+Или проект из БД:
 
 ```bash
-python -m src.render --data data/project.yaml --out out/
+python -m src.render --project default --out out/default/ --format both
+# либо:
+python -m src.render --project-id <uuid> --out out/...
 ```
+
+Флаги: `--template tz|pz|all`, `--format md|docx|both`, `--style-profile`, `--templates-dir`.  
+`--data` / `--project` / `--project-id` — взаимно исключающие источники.
+
+Оформление `.docx` — [`style-profile.yaml`](style-profile.yaml) (A4, Times New Roman 12 pt, …).
 
 Проверка:
 
 ```bash
-python -m unittest tests.test_render_smoke -v
+python -m unittest discover -s tests -v
 ```
 
-## React-редактор (центр + боковые панели)
+## React-редактор
 
-Трёхпанельный UI: оглавление ТЗ/ПЗ | Markdown-шаблон с immutable-чипами `{{ }}` | панель переменных.
+Трёхпанельный UI + выбор проекта / версии: оглавление | шаблон с чипами `{{ }}` | переменные.
 
-```bash
-# Терминал 1 — API
-source .venv/bin/activate
-pip install -r requirements.txt
-uvicorn api.main:app --reload --port 8010
-
-# Терминал 2 — UI
-cd web && npm install && npm run dev
-```
-
-Откройте http://localhost:5173. Кнопка «Сгенерировать» сохраняет проект и шаблон, затем пишет `out/`.
+Кнопка «Сгенерировать» сохраняет проект в БД и пишет `out/{slug}/`.
 
 ### Откат к Streamlit MVP
 
@@ -66,11 +60,13 @@ cd web && npm install && npm run dev
 
 ```bash
 git checkout streamlit-mvp
-# или новая ветка от тега:
+# или:
 git switch -c restore-streamlit streamlit-mvp
 ```
 
 ## UI заполнения переменных (Streamlit, fallback)
+
+Файловый режим (без Postgres UI):
 
 ```bash
 source .venv/bin/activate
@@ -78,31 +74,50 @@ pip install -r requirements.txt
 streamlit run ui/app.py --server.headless false
 ```
 
-Откроется браузер (обычно http://localhost:8501). В UI можно править секции YAML, сохранить в `data/project.yaml` и сгенерировать ТЗ/ПЗ в `out/` (`.md` и `.docx`).
+Обычно http://localhost:8501 — правки в `data/project.yaml`, генерация в `out/`.
 
 ## Production (LAN: 10.91.0.142)
 
-Один процесс FastAPI отдаёт API и собранный UI (`web/dist`) на порту **8080**.
+Один процесс FastAPI отдаёт API и собранный UI (`web/dist`) на порту **8080**.  
+Авторизация на LAN **пока отсутствует** — сервис открыт всем, кто достучится до порта.
+
+### Один раз на сервере
+
+После первой синхронизации (или вручную):
 
 ```bash
-# Сборка фронта + rsync + запуск на сервере (по умолчанию nineone@10.91.0.142)
+cd ~/vitalych   # или /opt/vitalych
+cp .env.example .env
+# задайте сильный POSTGRES_PASSWORD и тот же пароль в DATABASE_URL
+# не коммитьте реальные пароли
+```
+
+`docker-compose.yml` сейчас использует те же дефолты, что `.env.example` (`vitalych`/`vitalych`).  
+Если меняете пароль в `.env`, синхронизируйте учётные данные Postgres в compose (или держите дефолты только в доверенной LAN).
+
+### Деплой с рабочей машины
+
+```bash
 chmod +x scripts/deploy.sh
 ./scripts/deploy.sh
-# или явно:
+# или:
 ./scripts/deploy.sh nineone@10.91.0.142
 ```
 
+Скрипт: сборка UI → rsync (`.env` на сервере **не** перезаписывается) → `docker compose up -d` → venv/pip → `alembic upgrade head` → `seed_from_files` → restart systemd (`EnvironmentFile=…/.env`).
+
 После деплоя: http://10.91.0.142:8080/  
-Health: http://10.91.0.142:8080/api/health
+Health: http://10.91.0.142:8080/api/health  
+Projects: http://10.91.0.142:8080/api/projects
 
 На сервере:
 
 ```bash
-# user-сервис (без sudo) — переживает закрытие терминала/SSH
+# user-сервис (без sudo) — EnvironmentFile=-%h/vitalych/.env
 systemctl --user status vitalych
 systemctl --user restart vitalych
 
-# если когда-нибудь будет root-unit:
+# root-unit (/opt/vitalych):
 sudo systemctl status vitalych
 sudo systemctl restart vitalych
 ```
