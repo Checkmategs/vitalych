@@ -107,7 +107,9 @@ if [[ -z "\$UV" ]]; then
   exit 1
 fi
 # System python is 3.8; app needs 3.9+ (dict[str, ...] annotations).
-"\$UV" venv --python 3.12 .venv
+if [[ ! -x .venv/bin/python ]]; then
+  "\$UV" venv --python 3.12 .venv
+fi
 "\$UV" pip install --python .venv/bin/python -r requirements.txt
 
 echo "==> alembic upgrade head"
