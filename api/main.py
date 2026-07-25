@@ -28,7 +28,9 @@ from src.project_store import (
     create_project,
     create_version,
     delete_project,
+    delete_version,
     get_project,
+    get_version,
     list_projects,
     list_versions,
     load_seed_assets,
@@ -259,12 +261,27 @@ def api_restore_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[st
     try:
         with get_session() as session:
             project = _require_project(session, project_id)
-            versions = {v.id: v for v in list_versions(session, project_id)}
-            version = versions.get(version_id)
+            version = get_version(session, project_id, version_id)
             if version is None:
                 raise HTTPException(status_code=404, detail="Version not found")
             restore_version(session, project, version)
             return _project_full(project)
+    except HTTPException:
+        raise
+    except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.delete("/api/projects/{project_id}/versions/{version_id}")
+def api_delete_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str, bool]:
+    try:
+        with get_session() as session:
+            _require_project(session, project_id)
+            version = get_version(session, project_id, version_id)
+            if version is None:
+                raise HTTPException(status_code=404, detail="Version not found")
+            delete_version(session, version)
+            return {"ok": True}
     except HTTPException:
         raise
     except (SQLAlchemyError, OSError) as e:

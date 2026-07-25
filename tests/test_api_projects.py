@@ -165,6 +165,12 @@ class ApiProjectsTest(unittest.TestCase):
             404,
         )
         self.assertEqual(
+            self.client.delete(
+                f"/api/projects/{missing_id}/versions/{uuid.uuid4()}"
+            ).status_code,
+            404,
+        )
+        self.assertEqual(
             self.client.post(f"/api/projects/{missing_id}/render", json={}).status_code,
             404,
         )
@@ -186,6 +192,67 @@ class ApiProjectsTest(unittest.TestCase):
             ).status_code,
             404,
         )
+        self.assertEqual(
+            self.client.delete(
+                f"/api/projects/{project_id}/versions/{uuid.uuid4()}"
+            ).status_code,
+            404,
+        )
+
+    def test_soft_delete_version_and_project(self) -> None:
+        suffix = uuid.uuid4().hex[:8]
+        slug = f"api-soft-{suffix}"
+        create = self.client.post(
+            "/api/projects",
+            json={"name": f"API Soft {suffix}", "slug": slug},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        project_id = create.json()["id"]
+        # Do not _track for final assert on slug reuse cleanup path — track then untrack after delete
+        self._track(project_id)
+
+        ver = self.client.post(
+            f"/api/projects/{project_id}/versions",
+            json={"label": "v1"},
+        )
+        self.assertEqual(ver.status_code, 200, ver.text)
+        version_id = ver.json()["id"]
+
+        deleted_v = self.client.delete(
+            f"/api/projects/{project_id}/versions/{version_id}"
+        )
+        self.assertEqual(deleted_v.status_code, 200)
+        self.assertEqual(deleted_v.json(), {"ok": True})
+
+        listed = self.client.get(f"/api/projects/{project_id}/versions")
+        self.assertEqual(listed.status_code, 200)
+        self.assertEqual(listed.json(), [])
+
+        again_v = self.client.delete(
+            f"/api/projects/{project_id}/versions/{version_id}"
+        )
+        self.assertEqual(again_v.status_code, 404)
+
+        restore = self.client.post(
+            f"/api/projects/{project_id}/versions/{version_id}/restore"
+        )
+        self.assertEqual(restore.status_code, 404)
+
+        deleted_p = self.client.delete(f"/api/projects/{project_id}")
+        self.assertEqual(deleted_p.status_code, 200)
+        self.assertEqual(deleted_p.json(), {"ok": True})
+        self.created_ids.remove(project_id)
+
+        self.assertEqual(self.client.get(f"/api/projects/{project_id}").status_code, 404)
+        self.assertEqual(self.client.delete(f"/api/projects/{project_id}").status_code, 404)
+
+        # Slug reusable
+        recreate = self.client.post(
+            "/api/projects",
+            json={"name": f"API Soft Re {suffix}", "slug": slug},
+        )
+        self.assertEqual(recreate.status_code, 200, recreate.text)
+        self._track(recreate.json()["id"])
 
     def test_duplicate_slug_409(self) -> None:
         suffix = uuid.uuid4().hex[:8]
