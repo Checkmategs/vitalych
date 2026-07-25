@@ -16,7 +16,7 @@ from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
 from sqlalchemy import text
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
 ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
@@ -172,6 +172,8 @@ def api_create_project(body: ProjectCreateBody) -> dict[str, Any]:
             return _project_full(project)
     except SlugConflictError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except IntegrityError as e:
+        raise HTTPException(status_code=409, detail="Slug already exists") from e
     except FileNotFoundError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except (ValueError, yaml.YAMLError) as e:

@@ -196,6 +196,21 @@ class ApiProjectsTest(unittest.TestCase):
         second = self.client.post("/api/projects", json={"name": "Dup B", "slug": slug})
         self.assertEqual(second.status_code, 409, second.text)
 
+    def test_create_integrity_error_409(self) -> None:
+        from sqlalchemy.exc import IntegrityError
+
+        with patch(
+            "api.main.create_project",
+            side_effect=IntegrityError("stmt", {}, Exception("unique slug")),
+        ):
+            create = self.client.post(
+                "/api/projects",
+                json={"name": "Race", "slug": f"api-race-{uuid.uuid4().hex[:8]}"},
+            )
+        self.assertEqual(create.status_code, 409, create.text)
+        self.assertNotEqual(create.status_code, 503)
+        self.assertNotIn("Database unavailable", create.text)
+
     def test_health_reports_db(self) -> None:
         health = self.client.get("/api/health")
         self.assertEqual(health.status_code, 200)
