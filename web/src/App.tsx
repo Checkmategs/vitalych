@@ -27,6 +27,38 @@ import {
 import { findNode, outlineForDoc } from './schema/outline'
 import './App.css'
 
+/** Shared across Strict Mode double-mount so only one default project is created. */
+let ensureDefaultProjectInFlight: Promise<ProjectSummary[]> | null = null
+
+/**
+ * List projects; if empty, re-list then create at most once (module lock).
+ * Concurrent callers share the same in-flight promise and get the resulting list.
+ */
+async function listOrCreateDefaultProject(): Promise<ProjectSummary[]> {
+  let list = await listProjects()
+  if (list.length > 0) return list
+
+  if (!ensureDefaultProjectInFlight) {
+    ensureDefaultProjectInFlight = (async () => {
+      // Re-list immediately before create — another request may have won the race.
+      const again = await listProjects()
+      if (again.length > 0) return again
+      const created = await createProject({ name: 'Новый проект' })
+      return [
+        {
+          id: created.id,
+          slug: created.slug,
+          name: created.name,
+          updated_at: created.updated_at,
+        },
+      ]
+    })().finally(() => {
+      ensureDefaultProjectInFlight = null
+    })
+  }
+  return ensureDefaultProjectInFlight
+}
+
 export default function App() {
   const [doc, setDoc] = useState<TemplateKey>('tz')
   const [projectId, setProjectId] = useState<string | null>(null)
@@ -78,39 +110,31 @@ export default function App() {
     [applyProject, refreshVersions],
   )
 
-  const loadBootstrap = useCallback(async () => {
+  const loadBootstrap = useCallback(async (signal?: { cancelled: boolean }) => {
     setLoading(true)
     setError(null)
     try {
-      let list = await listProjects()
-      if (list.length === 0) {
-        const created = await createProject({ name: 'Новый проект' })
-        list = [
-          {
-            id: created.id,
-            slug: created.slug,
-            name: created.name,
-            updated_at: created.updated_at,
-          },
-        ]
-        setProjects(list)
-        applyProject(created, 'tz')
-        setVersions([])
-        return
-      }
+      const list = await listOrCreateDefaultProject()
+      if (signal?.cancelled) return
       setProjects(list)
       const stored = readStoredProjectId()
       const pick = list.find((p) => p.id === stored)?.id ?? list[0].id
       await openProject(pick, 'tz')
+      if (signal?.cancelled) return
     } catch (e) {
+      if (signal?.cancelled) return
       setError(e instanceof Error ? e.message : String(e))
     } finally {
-      setLoading(false)
+      if (!signal?.cancelled) setLoading(false)
     }
-  }, [applyProject, openProject])
+  }, [openProject])
 
   useEffect(() => {
-    void loadBootstrap()
+    const signal = { cancelled: false }
+    void loadBootstrap(signal)
+    return () => {
+      signal.cancelled = true
+    }
   }, [loadBootstrap])
 
   const templatesForPut = (activeDoc: TemplateKey, activeTemplate: string) => ({
