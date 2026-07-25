@@ -214,6 +214,48 @@ class ApiProjectsTest(unittest.TestCase):
             create = self.client.post("/api/projects", json={"name": "Nope"})
             self.assertEqual(create.status_code, 503)
 
+    def test_create_missing_seed_not_503(self) -> None:
+        with patch(
+            "api.main.load_seed_assets",
+            side_effect=FileNotFoundError("Seed template not found: templates/tz.md.j2"),
+        ):
+            create = self.client.post(
+                "/api/projects",
+                json={"name": "Missing seed", "slug": f"api-seed-{uuid.uuid4().hex[:8]}"},
+            )
+        self.assertIn(create.status_code, (400, 404), create.text)
+        self.assertNotEqual(create.status_code, 503)
+        self.assertNotIn("Database unavailable", create.text)
+
+    def test_render_invalid_style_profile_yaml_400(self) -> None:
+        suffix = uuid.uuid4().hex[:8]
+        create = self.client.post(
+            "/api/projects",
+            json={"name": f"Bad YAML {suffix}", "slug": f"api-yaml-{suffix}"},
+        )
+        self.assertEqual(create.status_code, 200, create.text)
+        project_id = self._track(create.json()["id"])
+
+        put = self.client.put(
+            f"/api/projects/{project_id}",
+            json={
+                "data": {
+                    "system": {"name": "Bad YAML", "short_name": "BY"},
+                    "meta": {"title": "t"},
+                },
+                "template_tz": "## 1. Общие сведения\n{{ system.name }}\n",
+                "template_pz": "## 1. Общие положения\n{{ system.name }}\n",
+                "style_profile": "page: [\n  broken: yaml: ::",
+            },
+        )
+        self.assertEqual(put.status_code, 200, put.text)
+
+        rendered = self.client.post(
+            f"/api/projects/{project_id}/render",
+            json={"template": "tz", "format": "docx"},
+        )
+        self.assertEqual(rendered.status_code, 400, rendered.text)
+
 
 if __name__ == "__main__":
     unittest.main()

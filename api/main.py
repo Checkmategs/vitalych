@@ -8,6 +8,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Literal
 
+import yaml
 from jinja2 import TemplateNotFound, UndefinedError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -171,10 +172,12 @@ def api_create_project(body: ProjectCreateBody) -> dict[str, Any]:
             return _project_full(project)
     except SlugConflictError as e:
         raise HTTPException(status_code=409, detail=str(e)) from e
+    except FileNotFoundError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (ValueError, yaml.YAMLError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
     except (SQLAlchemyError, OSError) as e:
         raise HTTPException(status_code=503, detail="Database unavailable") from e
-    except (ValueError, FileNotFoundError) as e:
-        raise HTTPException(status_code=400, detail=str(e)) from e
 
 
 @app.get("/api/projects/{project_id}")
@@ -300,12 +303,12 @@ def api_render(project_id: uuid.UUID, body: RenderBody = RenderBody()) -> dict[s
         return {"written": [str(p.relative_to(ROOT)) for p in written]}
     except HTTPException:
         raise
-    except (SQLAlchemyError, OSError) as e:
-        raise HTTPException(status_code=503, detail="Database unavailable") from e
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except (ValueError, UndefinedError, TemplateNotFound) as e:
+    except (ValueError, yaml.YAMLError, UndefinedError, TemplateNotFound, OSError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
 
 
 @app.get("/api/projects/{project_id}/download/{filename}")
