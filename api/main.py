@@ -101,9 +101,16 @@ def get_project() -> dict[str, Any]:
         raise HTTPException(status_code=400, detail=str(e)) from e
 
 
+def _backup_file(path: Path) -> None:
+    """Keep one previous copy next to the file (*.bak) before overwrite."""
+    if path.is_file():
+        path.with_suffix(path.suffix + ".bak").write_bytes(path.read_bytes())
+
+
 @app.put("/api/project")
 def put_project(body: ProjectPutBody) -> dict[str, Any]:
     try:
+        _backup_file(PROJECT_YAML)
         save_yaml(PROJECT_YAML, body.data)
         return load_data(PROJECT_YAML)
     except (OSError, ValueError, yaml.YAMLError) as e:
@@ -123,6 +130,7 @@ def put_template(key: TemplateKey, body: TemplatePutBody) -> dict[str, str]:
     path = template_path(key)
     try:
         path.parent.mkdir(parents=True, exist_ok=True)
+        _backup_file(path)
         path.write_text(body.content, encoding="utf-8")
     except OSError as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
