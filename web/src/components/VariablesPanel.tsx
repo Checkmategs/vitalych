@@ -6,6 +6,7 @@ import {
   getByPath,
   isCustomField,
   jinjaForSlug,
+  readNominative,
   listFieldsOf,
   listToStrings,
   setByPath,
@@ -229,10 +230,6 @@ export function VariablesPanel({ data, onChange }: Props) {
   const [modal, setModal] = useState<ModalState>(null)
   const [createObjectTypeNonce, setCreateObjectTypeNonce] = useState(0)
 
-  const setField = (field: FieldDef, value: unknown) => {
-    onChange(setByPath(data, field.path, value) as Record<string, unknown>)
-  }
-
   const editingField = modal?.mode === 'edit' ? modal.field : null
   const existingSlugs = new Set(allFields(data).map((f) => f.slug))
 
@@ -250,7 +247,7 @@ export function VariablesPanel({ data, onChange }: Props) {
           >
             {textFields.map((field) => {
               const raw = getByPath(data, field.path)
-              const value = raw == null ? '' : String(raw)
+              const value = readNominative(raw)
               return (
                 <TextFieldCard
                   key={field.slug}
@@ -323,18 +320,20 @@ export function VariablesPanel({ data, onChange }: Props) {
         <FieldEditModal
           field={modal.field}
           value={getByPath(data, modal.field.path)}
-          onChange={(v) => setField(modal.field, v)}
           settingsEditable={isCustomField(data, modal.field.slug)}
-          onMetaChange={(draft) => {
-            const err = validateFieldUpdate(data, modal.field.slug, draft)
-            if (err === 'label') return 'Укажите название'
-            if (err === 'slug') return 'Код: латиница, цифры, _, сегменты через точку'
-            if (err === 'duplicate') return 'Поле с таким кодом уже есть'
-            if (err === 'conflict') return 'Код пересекается с существующими полями данных'
-            const result = updateCustomField(data, modal.field.slug, draft)
-            if (!result) return 'Не удалось обновить поле'
-            onChange(result.data)
-            setModal({ mode: 'edit', field: result.field })
+          onSave={(value, meta) => {
+            let next = setByPath(data, modal.field.path, value) as Record<string, unknown>
+            if (meta && isCustomField(data, modal.field.slug)) {
+              const err = validateFieldUpdate(next, modal.field.slug, meta)
+              if (err === 'label') return 'Укажите название'
+              if (err === 'slug') return 'Код: латиница, цифры, _, сегменты через точку'
+              if (err === 'duplicate') return 'Поле с таким кодом уже есть'
+              if (err === 'conflict') return 'Код пересекается с существующими полями данных'
+              const result = updateCustomField(next, modal.field.slug, meta)
+              if (!result) return 'Не удалось обновить поле'
+              next = result.data
+            }
+            onChange(next)
             return null
           }}
           onDelete={

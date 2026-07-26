@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from jinja2 import TemplateNotFound, UndefinedError
+from jinja2 import TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -39,6 +39,8 @@ from src.project_store import (
     update_project,
     update_version,
 )
+from src.artifacts import get_artifact_store
+from src.preview import preview_document
 from src.render import parse_formats, render_document_content, selected_keys
 from src.style_profile import load_style_profile_text
 
@@ -84,6 +86,17 @@ class VersionPutBody(BaseModel):
 class RenderBody(BaseModel):
     template: RenderTemplate = "all"
     format: RenderFormat = "both"
+
+
+PreviewTemplate = Literal["tz", "pz"]
+
+
+class PreviewBody(BaseModel):
+    template: PreviewTemplate = "tz"
+    data: dict[str, Any] | None = None
+    template_tz: str | None = None
+    template_pz: str | None = None
+    style_profile: str | None = None
 
 
 _DEFAULT_CORS_ORIGINS = (
@@ -399,12 +412,59 @@ def api_delete_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str
         raise HTTPException(status_code=503, detail="Database unavailable") from e
 
 
+@app.post("/api/projects/{project_id}/preview")
+def api_preview(project_id: uuid.UUID, body: PreviewBody = PreviewBody()) -> dict[str, Any]:
+    try:
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            data = body.data if body.data is not None else project.data
+            template_tz = body.template_tz if body.template_tz is not None else project.template_tz
+            template_pz = body.template_pz if body.template_pz is not None else project.template_pz
+            style_profile_text = (
+                body.style_profile if body.style_profile is not None else project.style_profile
+            )
+
+        result = preview_document(
+            body.template,
+            data,
+            template_tz,
+            template_pz,
+            style_profile_text=style_profile_text,
+        )
+        return result.as_dict()
+    except HTTPException:
+        raise
+    except UndefinedError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "undefined"},
+        ) from e
+    except (TemplateSyntaxError, TemplateNotFound) as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "template"},
+        ) from e
+    except TemplateError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "other"},
+        ) from e
+    except (ValueError, yaml.YAMLError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "other"},
+        ) from e
+    except SQLAlchemyError as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
 @app.post("/api/projects/{project_id}/render")
 def api_render(project_id: uuid.UUID, body: RenderBody = RenderBody()) -> dict[str, list[str]]:
     try:
         with get_session() as session:
             project = _require_project(session, project_id)
             slug = project.slug
+            workspace_id = project.workspace_id
             data = project.data
             template_tz = project.template_tz
             template_pz = project.template_pz
@@ -415,7 +475,8 @@ def api_render(project_id: uuid.UUID, body: RenderBody = RenderBody()) -> dict[s
         if "docx" in formats:
             profile = load_style_profile_text(style_profile_text)
 
-        out_dir = OUT_DIR / slug
+        store = get_artifact_store(OUT_DIR)
+        out_dir = store.dir_for(workspace_id, slug)
         written: list[Path] = []
         for key in selected_keys(body.template):
             written.extend(
@@ -435,7 +496,11 @@ def api_render(project_id: uuid.UUID, body: RenderBody = RenderBody()) -> dict[s
         raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except (ValueError, yaml.YAMLError, UndefinedError, TemplateNotFound, OSError) as e:
+    except UndefinedError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (TemplateSyntaxError, TemplateNotFound, TemplateError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (ValueError, yaml.YAMLError, OSError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except SQLAlchemyError as e:
         raise HTTPException(status_code=503, detail="Database unavailable") from e
@@ -443,7 +508,7 @@ def api_render(project_id: uuid.UUID, body: RenderBody = RenderBody()) -> dict[s
 
 @app.get("/api/projects/{project_id}/download/{filename}")
 def api_download(project_id: uuid.UUID, filename: str) -> FileResponse:
-    """Serve a generated .docx from out/{slug}/ (no path traversal, docx only)."""
+    """Serve a generated .docx from artifact store (no path traversal, docx only)."""
     name = Path(filename).name
     if name != filename or not name.endswith(".docx") or ".." in filename:
         raise HTTPException(status_code=400, detail="Only .docx filenames are allowed")
@@ -451,23 +516,33 @@ def api_download(project_id: uuid.UUID, filename: str) -> FileResponse:
         with get_session() as session:
             project = _require_project(session, project_id)
             slug = project.slug
+            workspace_id = project.workspace_id
     except HTTPException:
         raise
     except (SQLAlchemyError, OSError) as e:
         raise HTTPException(status_code=503, detail="Database unavailable") from e
 
-    base = (OUT_DIR / slug).resolve()
-    path = (base / name).resolve()
+    store = get_artifact_store(OUT_DIR)
+    base = store.dir_for(workspace_id, slug).resolve()
+    path = store.path_for(workspace_id, slug, name).resolve()
     try:
         path.relative_to(base)
     except ValueError as e:
         raise HTTPException(status_code=400, detail="Invalid path") from e
+    # One-release shim: older renders under out/{slug}/
+    if not path.is_file():
+        legacy = (OUT_DIR / slug / name).resolve()
+        try:
+            legacy.relative_to((OUT_DIR / slug).resolve())
+            if legacy.is_file():
+                path = legacy
+        except ValueError:
+            pass
     if not path.is_file():
         raise HTTPException(status_code=404, detail=f"File not found: {name}")
     return FileResponse(
         path,
-        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-        filename=name,
+        media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",        filename=name,
     )
 
 

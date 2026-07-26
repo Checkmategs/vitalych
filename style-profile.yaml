@@ -122,6 +122,13 @@ footer:
     font_size_pt: 12
   different_even_and_odd: true
 
+frame:
+  preset: none
+  stamp_fields:
+    designation: "{{ system.topic_code }}"
+    title: "{{ system.name }}"
+    developer: "{{ parties.developer }}"
+
 artifacts:
   reference_docx: reference.docx
   browser_preview_css: preview.css

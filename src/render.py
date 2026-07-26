@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 from jinja2 import DictLoader, Environment, FileSystemLoader, StrictUndefined, TemplateNotFound, UndefinedError
 
+from src.cases import make_case_filter, prepare_render_data
 from src.db import get_session
 from src.md_to_docx import markdown_to_docx
 from src.project_store import get_project, get_project_by_slug
@@ -47,6 +48,7 @@ def _write_rendered(
     style_profile: dict | None,
     style_profile_path: Path | None,
     style_profile_text: str | None,
+    data: dict | None = None,
 ) -> list[Path]:
     _, stem = TEMPLATE_MAP[template_key]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -67,9 +69,53 @@ def _write_rendered(
                     "style_profile_text, or style_profile_path"
                 )
         docx_path = out_dir / f"{stem}.docx"
-        markdown_to_docx(text, docx_path, profile=style_profile)
+        markdown_to_docx(text, docx_path, profile=style_profile, data=data)
         written.append(docx_path)
     return written
+
+
+def render_markdown_from_files(
+    template_key: str,
+    data: dict,
+    templates_dir: Path,
+) -> str:
+    if template_key not in TEMPLATE_MAP:
+        raise ValueError(f"Unknown template: {template_key}")
+    j2_name, _stem = TEMPLATE_MAP[template_key]
+    j2_path = templates_dir / j2_name
+    if not j2_path.is_file():
+        raise FileNotFoundError(f"Template not found: {j2_path}")
+
+    wrapped, warnings = prepare_render_data(data)
+    env = Environment(
+        loader=FileSystemLoader(str(templates_dir)),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    env.filters["case"] = make_case_filter(warnings)
+    return env.get_template(j2_name).render(**wrapped)
+
+
+def render_markdown_content(
+    template_key: str,
+    data: dict,
+    template_tz: str,
+    template_pz: str,
+) -> str:
+    """Render Jinja template to Markdown string (no disk I/O)."""
+    if template_key not in TEMPLATE_MAP:
+        raise ValueError(f"Unknown template: {template_key}")
+    j2_name, _stem = TEMPLATE_MAP[template_key]
+    wrapped, warnings = prepare_render_data(data)
+    env = Environment(
+        loader=DictLoader({"tz.md.j2": template_tz, "pz.md.j2": template_pz}),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    env.filters["case"] = make_case_filter(warnings)
+    return env.get_template(j2_name).render(**wrapped)
 
 
 def render_document(
@@ -81,21 +127,8 @@ def render_document(
     style_profile: dict | None = None,
     style_profile_path: Path | None = None,
 ) -> list[Path]:
-    if template_key not in TEMPLATE_MAP:
-        raise ValueError(f"Unknown template: {template_key}")
     formats = formats or {"md", "docx"}
-    j2_name, _stem = TEMPLATE_MAP[template_key]
-    j2_path = templates_dir / j2_name
-    if not j2_path.is_file():
-        raise FileNotFoundError(f"Template not found: {j2_path}")
-
-    env = Environment(
-        loader=FileSystemLoader(str(templates_dir)),
-        undefined=StrictUndefined,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-    text = env.get_template(j2_name).render(**data)
+    text = render_markdown_from_files(template_key, data, templates_dir)
     return _write_rendered(
         template_key,
         text,
@@ -104,6 +137,7 @@ def render_document(
         style_profile,
         style_profile_path,
         style_profile_text=None,
+        data=data,
     )
 
 
@@ -117,17 +151,8 @@ def render_document_content(
     style_profile: dict | None = None,
     style_profile_text: str | None = None,
 ) -> list[Path]:
-    if template_key not in TEMPLATE_MAP:
-        raise ValueError(f"Unknown template: {template_key}")
     formats = formats or {"md", "docx"}
-    j2_name, _stem = TEMPLATE_MAP[template_key]
-    env = Environment(
-        loader=DictLoader({"tz.md.j2": template_tz, "pz.md.j2": template_pz}),
-        undefined=StrictUndefined,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-    text = env.get_template(j2_name).render(**data)
+    text = render_markdown_content(template_key, data, template_tz, template_pz)
     return _write_rendered(
         template_key,
         text,
@@ -136,6 +161,7 @@ def render_document_content(
         style_profile,
         style_profile_path=None,
         style_profile_text=style_profile_text,
+        data=data,
     )
 
 
@@ -236,7 +262,11 @@ def main(argv: list[str] | None = None) -> int:
 
                 out_dir = args.out
                 if out_dir == Path("out"):
-                    out_dir = Path("out") / project.slug
+                    from src.artifacts import get_artifact_store
+
+                    out_dir = get_artifact_store(Path("out")).dir_for(
+                        project.workspace_id, project.slug
+                    )
 
                 for key in selected_keys(args.template):
                     written.extend(

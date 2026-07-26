@@ -1,6 +1,8 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { StructureTree } from './components/StructureTree'
 import { TemplateEditor } from './components/TemplateEditor'
+import { PreviewPane } from './components/PreviewPane'
+import { FramePresetSelect } from './components/FramePresetSelect'
 import { VariablesPanel } from './components/VariablesPanel'
 import {
   MainHeader,
@@ -19,10 +21,12 @@ import {
   getVersion,
   listProjects,
   listVersions,
+  previewProject,
   putProject,
   putVersion,
   renderProject,
   saveDocxAs,
+  type PreviewWarning,
   type Project,
   type ProjectData,
   type ProjectSummary,
@@ -77,6 +81,13 @@ export default function App() {
   const [scrollNonce, setScrollNonce] = useState(0)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  const [centerMode, setCenterMode] = useState<'template' | 'preview'>('template')
+  const [previewHtml, setPreviewHtml] = useState('')
+  const [previewMarkdown, setPreviewMarkdown] = useState('')
+  const [previewWarnings, setPreviewWarnings] = useState<PreviewWarning[]>([])
+  const [previewError, setPreviewError] = useState<string | null>(null)
+  const [previewLoading, setPreviewLoading] = useState(false)
+  const previewSeq = useRef(0)
 
   const syncFromProject = useCallback((full: Project, activeDoc: TemplateKey) => {
     setProjectId(full.id)
@@ -188,6 +199,53 @@ export default function App() {
   const markDirtyTemplate = (value: string) => {
     setTemplate(value)
     setDirty(true)
+  }
+
+  const runPreview = useCallback(async () => {
+    if (!projectId) return
+    const seq = ++previewSeq.current
+    setPreviewLoading(true)
+    setPreviewError(null)
+    try {
+      const tpl = templatesForPut(doc, template)
+      const result = await previewProject(projectId, {
+        template: doc,
+        data: project,
+        template_tz: tpl.template_tz,
+        template_pz: tpl.template_pz,
+        style_profile: styleProfile,
+      })
+      if (seq !== previewSeq.current) return
+      setPreviewHtml(result.html)
+      setPreviewMarkdown(result.markdown)
+      setPreviewWarnings(result.warnings ?? [])
+    } catch (e) {
+      if (seq !== previewSeq.current) return
+      setPreviewHtml('')
+      setPreviewMarkdown('')
+      setPreviewWarnings([])
+      setPreviewError(e instanceof Error ? e.message : String(e))
+    } finally {
+      if (seq === previewSeq.current) setPreviewLoading(false)
+    }
+  }, [projectId, doc, template, project, styleProfile, templateTz, templatePz])
+
+  useEffect(() => {
+    if (centerMode !== 'preview' || !projectId || loading) return
+    const t = window.setTimeout(() => {
+      void runPreview()
+    }, 400)
+    return () => window.clearTimeout(t)
+  }, [centerMode, projectId, loading, runPreview])
+
+  const onCopyMarkdown = async () => {
+    if (!previewMarkdown) return
+    try {
+      await navigator.clipboard.writeText(previewMarkdown)
+      toasts.success('Markdown скопирован')
+    } catch (e) {
+      toasts.error(e instanceof Error ? e.message : 'Не удалось скопировать')
+    }
   }
 
   /** Persist dirty editor state before navigation; project PUT if no active version. */
@@ -512,14 +570,50 @@ export default function App() {
       <div className="app-columns">
         <StructureTree doc={doc} selectedId={selectedId} onSelect={onSelectSection} />
         <main className="center-pane">
+          <div className="center-mode-bar">
+            <div className="mh-seg center-mode-seg" role="group" aria-label="Режим центральной панели">
+              <button
+                type="button"
+                className={`mh-seg-btn${centerMode === 'template' ? ' active' : ''}`}
+                onClick={() => setCenterMode('template')}
+              >
+                Шаблон
+              </button>
+              <button
+                type="button"
+                className={`mh-seg-btn${centerMode === 'preview' ? ' active' : ''}`}
+                onClick={() => setCenterMode('preview')}
+              >
+                Превью
+              </button>
+            </div>
+            <FramePresetSelect
+              styleProfile={styleProfile}
+              disabled={loading}
+              onChange={(next) => {
+                setStyleProfile(next)
+                setDirty(true)
+              }}
+            />
+          </div>
           {loading ? (
             <div className="pane-placeholder">Загрузка…</div>
-          ) : (
+          ) : centerMode === 'template' ? (
             <TemplateEditor
               value={template}
               onChange={markDirtyTemplate}
               scrollToHeading={scrollToHeading}
               scrollNonce={scrollNonce}
+            />
+          ) : (
+            <PreviewPane
+              html={previewHtml}
+              markdown={previewMarkdown}
+              warnings={previewWarnings}
+              error={previewError}
+              loading={previewLoading}
+              onRefresh={() => void runPreview()}
+              onCopyMarkdown={() => void onCopyMarkdown()}
             />
           )}
         </main>

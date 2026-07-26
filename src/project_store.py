@@ -11,7 +11,7 @@ import yaml
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from src.models import Project, ProjectVersion
+from src.models import LOCAL_WORKSPACE_ID, Project, ProjectVersion
 
 _UNSET = object()
 
@@ -80,6 +80,7 @@ def create_project(
     project = Project(
         name=name,
         slug=resolved,
+        workspace_id=LOCAL_WORKSPACE_ID,
         data=copy.deepcopy(data),
         template_tz=template_tz,
         template_pz=template_pz,

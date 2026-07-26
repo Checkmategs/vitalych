@@ -1,10 +1,16 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
+  ALL_CASE_KEYS,
+  CASE_LABELS,
   appendListItem,
   listToStrings,
+  readCases,
+  readNominative,
   removeListItem,
   updateListItemLabel,
   validateNewField,
+  writeCasedText,
+  type CaseKey,
   type FieldDef,
 } from '../schema/fields'
 
@@ -18,12 +24,15 @@ type EditProps = {
   mode?: 'edit'
   field: FieldDef
   value: unknown
-  onChange: (value: unknown) => void
+  /** Commit draft value (+ optional meta for custom fields). Return error or null. */
+  onSave: (
+    value: unknown,
+    meta?: { slug: string; label: string; kind: FieldDef['kind'] },
+  ) => string | null
   onClose: () => void
   /** When true, slug/kind/label are editable and delete is available (custom fields). */
   settingsEditable?: boolean
   existingSlugs?: Set<string>
-  onMetaChange?: (draft: { slug: string; label: string; kind: FieldDef['kind'] }) => string | null
   onDelete?: () => void
 }
 
@@ -96,26 +105,51 @@ function blankListItem(previous: unknown): unknown {
 }
 
 function TextValueEditor({
-  value,
+  rawValue,
   onChange,
   autoFocus,
 }: {
-  value: string
-  onChange: (v: string) => void
+  rawValue: unknown
+  onChange: (v: unknown) => void
   autoFocus?: boolean
 }) {
+  const nominative = readNominative(rawValue)
+  const cases = readCases(rawValue)
+
+  const setNominative = (next: string) => {
+    onChange(writeCasedText(next, cases))
+  }
+
+  const setCase = (key: CaseKey, next: string) => {
+    onChange(writeCasedText(nominative, { ...cases, [key]: next }))
+  }
+
   return (
     <div className="field-modal-value">
       <textarea
         className="field-modal-textarea"
         rows={6}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={nominative}
+        onChange={(e) => setNominative(e.target.value)}
         autoFocus={autoFocus}
       />
-      <div className="field-modal-value-footer">
-        <StubLink>Настроить падежи</StubLink>
-        <StubLink className="field-modal-stub field-modal-stub--history">↻ История</StubLink>
+      <div className="field-modal-cases">
+        <div className="field-modal-cases-title">Падежи</div>
+        {ALL_CASE_KEYS.map((key) => (
+          <label key={key} className="field-modal-case-row">
+            <span className="field-modal-case-label">{CASE_LABELS[key]}</span>
+            <input
+              className="field-modal-case-input"
+              type="text"
+              value={cases[key] ?? ''}
+              placeholder={nominative || '—'}
+              onChange={(e) => setCase(key, e.target.value)}
+            />
+          </label>
+        ))}
+        <p className="field-modal-case-hint">
+          В шаблоне: <code>{'{{ field | case(\'gen\') }}'}</code>
+        </p>
       </div>
     </div>
   )
@@ -350,7 +384,7 @@ function CreateFieldModal({
 
   const setKind = (kind: FieldDef['kind']) => {
     setDraft((d) => ({ ...d, kind }))
-    setValue(kind === 'list' ? [] : typeof value === 'string' ? value : '')
+    setValue(kind === 'list' ? [] : writeCasedText(readNominative(value), readCases(value)))
   }
 
   const submit = () => {
@@ -384,13 +418,9 @@ function CreateFieldModal({
         ? Array.isArray(value)
           ? value
           : []
-        : value == null
-          ? ''
-          : String(value)
+        : writeCasedText(readNominative(value), readCases(value))
     onCreate(def, initial)
   }
-
-  const textValue = value == null ? '' : String(value)
 
   return (
     <div className="field-modal-overlay" role="presentation" onClick={onClose}>
@@ -437,7 +467,7 @@ function CreateFieldModal({
             {draft.kind === 'list' ? (
               <ListValueEditor rawList={value} onChangeRaw={(next) => setValue(next)} />
             ) : (
-              <TextValueEditor value={textValue} onChange={setValue} />
+              <TextValueEditor rawValue={value} onChange={setValue} />
             )}
           </ModalAccordion>
 
@@ -460,33 +490,35 @@ function CreateFieldModal({
 function EditFieldModal({
   field,
   value,
-  onChange,
+  onSave,
   onClose,
   settingsEditable = false,
-  onMetaChange,
   onDelete,
 }: {
   field: FieldDef
   value: unknown
-  onChange: (value: unknown) => void
+  onSave: (
+    value: unknown,
+    meta?: { slug: string; label: string; kind: FieldDef['kind'] },
+  ) => string | null
   onClose: () => void
   settingsEditable?: boolean
-  onMetaChange?: (draft: { slug: string; label: string; kind: FieldDef['kind'] }) => string | null
   onDelete?: () => void
 }) {
   const settingsOpen = field.kind !== 'list'
-  const textValue = value == null ? '' : String(value)
   const [slugDraft, setSlugDraft] = useState(field.slug)
   const [labelDraft, setLabelDraft] = useState(field.label)
   const [kindDraft, setKindDraft] = useState(field.kind)
+  const [draftValue, setDraftValue] = useState(value)
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
     setSlugDraft(field.slug)
     setLabelDraft(field.label)
     setKindDraft(field.kind)
+    setDraftValue(value)
     setError(null)
-  }, [field.label, field.slug, field.kind])
+  }, [field.label, field.slug, field.kind, value])
 
   useEffect(() => {
     const onKey = (e: globalThis.KeyboardEvent) => {
@@ -496,14 +528,16 @@ function EditFieldModal({
     return () => window.removeEventListener('keydown', onKey)
   }, [onClose])
 
-  const applyMeta = (next: { slug: string; label: string; kind: FieldDef['kind'] }) => {
-    if (!settingsEditable || !onMetaChange) return
-    const err = onMetaChange(next)
+  const handleSave = () => {
+    const meta = settingsEditable
+      ? { slug: slugDraft.trim(), label: labelDraft.trim(), kind: kindDraft }
+      : undefined
+    const err = onSave(draftValue, meta)
     if (err) {
       setError(err)
       return
     }
-    setError(null)
+    onClose()
   }
 
   const handleDelete = () => {
@@ -511,6 +545,8 @@ function EditFieldModal({
     if (!window.confirm(`Удалить поле «${field.label}» (${field.slug})?`)) return
     onDelete()
   }
+
+  const isList = kindDraft === 'list' || (!settingsEditable && field.kind === 'list')
 
   return (
     <div className="field-modal-overlay" role="presentation" onClick={onClose}>
@@ -539,14 +575,7 @@ function EditFieldModal({
             kindDisabled={!settingsEditable}
             slugDisabled={!settingsEditable}
             labelDisabled={!settingsEditable}
-            onKindChange={
-              settingsEditable
-                ? (k) => {
-                    setKindDraft(k)
-                    applyMeta({ slug: slugDraft, label: labelDraft, kind: k })
-                  }
-                : undefined
-            }
+            onKindChange={settingsEditable ? (k) => setKindDraft(k) : undefined}
             onSlugChange={
               settingsEditable
                 ? (s) => {
@@ -555,45 +584,41 @@ function EditFieldModal({
                   }
                 : undefined
             }
-            onLabelChange={
-              settingsEditable
-                ? (s) => {
-                    setLabelDraft(s)
-                    applyMeta({ slug: slugDraft, label: s, kind: kindDraft })
-                  }
-                : undefined
-            }
+            onLabelChange={settingsEditable ? (s) => setLabelDraft(s) : undefined}
             defaultOpen={settingsOpen}
           />
-
-          {settingsEditable ? (
-            <div className="field-modal-meta-actions">
-              <button
-                type="button"
-                className="btn"
-                onClick={() =>
-                  applyMeta({ slug: slugDraft.trim(), label: labelDraft.trim(), kind: kindDraft })
-                }
-              >
-                Применить код
-              </button>
-              {onDelete ? (
-                <button type="button" className="btn btn-danger" onClick={handleDelete}>
-                  Удалить поле
-                </button>
-              ) : null}
-            </div>
-          ) : null}
 
           {error ? <div className="field-modal-error">{error}</div> : null}
 
           <ModalAccordion title="Значение" icon="✎" defaultOpen>
-            {kindDraft === 'list' || (!settingsEditable && field.kind === 'list') ? (
-              <ListValueEditor rawList={value} onChangeRaw={(next) => onChange(next)} />
+            {isList ? (
+              <ListValueEditor rawList={draftValue} onChangeRaw={(next) => setDraftValue(next)} />
             ) : (
-              <TextValueEditor value={textValue} onChange={(v) => onChange(v)} autoFocus />
+              <TextValueEditor
+                rawValue={draftValue}
+                onChange={setDraftValue}
+                autoFocus
+              />
             )}
           </ModalAccordion>
+        </div>
+
+        <div className="field-modal-footer">
+          {onDelete ? (
+            <button type="button" className="btn btn-danger" onClick={handleDelete}>
+              Удалить
+            </button>
+          ) : (
+            <span />
+          )}
+          <div className="field-modal-footer-right">
+            <button type="button" className="btn" onClick={onClose}>
+              Отмена
+            </button>
+            <button type="button" className="btn btn-primary" onClick={handleSave}>
+              Сохранить
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -616,10 +641,9 @@ export function FieldEditModal(props: Props) {
     <EditFieldModal
       field={props.field}
       value={props.value}
-      onChange={props.onChange}
+      onSave={props.onSave}
       onClose={props.onClose}
       settingsEditable={props.settingsEditable}
-      onMetaChange={props.onMetaChange}
       onDelete={props.onDelete}
     />
   )

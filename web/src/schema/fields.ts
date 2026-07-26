@@ -213,7 +213,11 @@ function pathCollidesWithFields(
   // but not the field's own value when updating that same path (list fields).
   if (excludedPath && pathsEqual(excludedPath, path)) return false
   const at = getByPath(data, path)
-  if (at != null && typeof at === 'object') return true
+  if (at != null && typeof at === 'object') {
+    // Wrapped nominative+cases is a leaf text value, not a subtree.
+    if (isCasedDict(at)) return false
+    return true
+  }
   return false
 }
 
@@ -291,7 +295,7 @@ function coerceFieldValue(value: unknown, fromKind: FieldDef['kind'], toKind: Fi
   if (fromKind === toKind) return value
   if (toKind === 'list') {
     if (Array.isArray(value)) return value
-    const s = value == null ? '' : String(value).trim()
+    const s = readNominative(value).trim()
     return s ? [s] : []
   }
   // text / textarea
@@ -301,7 +305,7 @@ function coerceFieldValue(value: unknown, fromKind: FieldDef['kind'], toKind: Fi
       .filter(Boolean)
       .join('\n')
   }
-  return value == null ? '' : String(value)
+  return readNominative(value)
 }
 
 export type FieldUpdateError = FieldCreateError
@@ -374,6 +378,59 @@ export function deleteCustomField(
 
 export function jinjaForSlug(slug: string): string {
   return `{{ ${slug} }}`
+}
+
+export type CaseKey = 'gen' | 'dat' | 'acc' | 'ins' | 'pre'
+
+export const DEFAULT_CASE_KEYS: CaseKey[] = ['gen', 'dat']
+export const ALL_CASE_KEYS: CaseKey[] = ['gen', 'dat', 'acc', 'ins', 'pre']
+
+export const CASE_LABELS: Record<CaseKey, string> = {
+  gen: 'Родительный',
+  dat: 'Дательный',
+  acc: 'Винительный',
+  ins: 'Творительный',
+  pre: 'Предложный',
+}
+
+export function isCasedDict(value: unknown): value is { value: string; cases?: Partial<Record<CaseKey, string>> } {
+  if (value == null || typeof value !== 'object' || Array.isArray(value)) return false
+  const obj = value as Record<string, unknown>
+  if (typeof obj.value !== 'string') return false
+  const keys = Object.keys(obj)
+  return keys.every((k) => k === 'value' || k === 'cases')
+}
+
+export function readNominative(raw: unknown): string {
+  if (raw == null) return ''
+  if (isCasedDict(raw)) return raw.value
+  if (typeof raw === 'string') return raw
+  if (typeof raw === 'number' || typeof raw === 'boolean') return String(raw)
+  return ''
+}
+
+export function readCases(raw: unknown): Partial<Record<CaseKey, string>> {
+  if (!isCasedDict(raw) || raw.cases == null || typeof raw.cases !== 'object') return {}
+  const out: Partial<Record<CaseKey, string>> = {}
+  for (const key of ALL_CASE_KEYS) {
+    const v = (raw.cases as Record<string, unknown>)[key]
+    if (typeof v === 'string' && v.trim()) out[key] = v
+  }
+  return out
+}
+
+/** Store bare string when no case forms; otherwise `{ value, cases }`. */
+export function writeCasedText(
+  nominative: string,
+  cases: Partial<Record<CaseKey, string>>,
+): string | { value: string; cases: Partial<Record<CaseKey, string>> } {
+  const cleaned: Partial<Record<CaseKey, string>> = {}
+  for (const key of ALL_CASE_KEYS) {
+    const v = cases[key]?.trim()
+    if (v) cleaned[key] = v
+  }
+  if (Object.keys(cleaned).length === 0) return nominative
+  return { value: nominative, cases: cleaned }
 }
 
 export function getByPath(obj: unknown, path: string[]): unknown {
