@@ -9,6 +9,7 @@ from pathlib import Path
 import os
 
 from src.db import get_session
+from src.models import LOCAL_WORKSPACE_ID
 from src.project_store import create_project, delete_project, get_project
 from src.render import build_parser, main
 
@@ -62,7 +63,7 @@ class RenderFromDbIntegrationTest(unittest.TestCase):
                     os.chdir(old)
 
                 self.assertEqual(code, 0)
-                out_md = cwd / "out" / slug / "tz.md"
+                out_md = cwd / "out" / str(LOCAL_WORKSPACE_ID) / slug / "tz.md"
                 self.assertTrue(out_md.is_file(), msg=f"missing {out_md}")
                 text = out_md.read_text(encoding="utf-8")
                 self.assertIn("## 1. Общие сведения", text)
