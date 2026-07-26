@@ -1060,9 +1060,19 @@
 
 .field-modal-footer {
   display: flex;
-  justify-content: flex-end;
+  align-items: center;
+  justify-content: space-between;
   gap: 8px;
-  padding-top: 4px;
+  padding: 12px 16px 16px;
+  border-top: 1px solid var(--border);
+  flex-shrink: 0;
+}
+
+.field-modal-footer-right {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
 }
 
 .field-modal-section {
@@ -1210,6 +1220,14 @@
   margin-top: 10px;
   padding-top: 10px;
   border-top: 1px dashed var(--border);
+}
+
+.field-modal-cases-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
 }
 
 .field-modal-case-row {
