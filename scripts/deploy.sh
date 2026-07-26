@@ -84,15 +84,17 @@ if ! docker compose version >/dev/null 2>&1; then
 fi
 
 echo "==> Starting Postgres (docker compose)"
-docker compose up -d
+# Redirect stdin so docker compose does not swallow the remainder of this
+# remote script (SSH feeds the script to bash via stdin).
+docker compose up -d </dev/null
 # Wait until Postgres accepts connections
 for i in \$(seq 1 30); do
-  if docker compose exec -T db pg_isready -U "\${POSTGRES_USER:-vitalych}" -d "\${POSTGRES_DB:-vitalych}" >/dev/null 2>&1; then
+  if docker compose exec -T db pg_isready -U "\${POSTGRES_USER:-vitalych}" -d "\${POSTGRES_DB:-vitalych}" </dev/null >/dev/null 2>&1; then
     break
   fi
   if [[ \$i -eq 30 ]]; then
     echo "Postgres did not become ready in time" >&2
-    docker compose ps >&2 || true
+    docker compose ps </dev/null >&2 || true
     exit 1
   fi
   sleep 1
@@ -106,10 +108,13 @@ if [[ -z "\$UV" ]]; then
   echo "uv not found; install uv or set PATH" >&2
   exit 1
 fi
+echo "==> uv: \$UV"
 # System python is 3.8; app needs 3.9+ (dict[str, ...] annotations).
 if [[ ! -x .venv/bin/python ]]; then
+  echo "==> creating .venv (python 3.12)"
   "\$UV" venv --python 3.12 .venv
 fi
+echo "==> pip install -r requirements.txt"
 "\$UV" pip install --python .venv/bin/python -r requirements.txt
 
 echo "==> alembic upgrade head"
@@ -119,17 +124,30 @@ echo "==> seed_from_files (no-op if projects exist)"
 .venv/bin/python scripts/seed_from_files.py
 
 if command -v systemctl >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+  echo "==> restarting system systemd unit"
   UNIT=/tmp/vitalych.service
   sed "s|/opt/vitalych|\$DIR|g" deploy/vitalych.service > "\$UNIT"
   sudo cp "\$UNIT" /etc/systemd/system/vitalych.service
   sudo systemctl daemon-reload
   sudo systemctl enable vitalych.service
+  OLD_PID="\$(sudo systemctl show -p MainPID --value vitalych.service 2>/dev/null || echo 0)"
   sudo systemctl restart vitalych.service
   sleep 1
+  NEW_PID="\$(sudo systemctl show -p MainPID --value vitalych.service)"
+  echo "    PID \$OLD_PID -> \$NEW_PID"
   sudo systemctl --no-pager --full status vitalych.service || true
+  if [[ -z "\$NEW_PID" || "\$NEW_PID" == 0 ]]; then
+    echo "system unit failed to start" >&2
+    exit 1
+  fi
+  if [[ "\$OLD_PID" != 0 && "\$NEW_PID" == "\$OLD_PID" ]]; then
+    echo "system unit PID did not change after restart" >&2
+    exit 1
+  fi
 elif command -v systemctl >/dev/null 2>&1; then
   # No passwordless sudo: user systemd unit (survives closing SSH/terminal).
   # Unit paths use %h/vitalych — matches default REMOTE_ABS=\$HOME/vitalych.
+  echo "==> restarting user systemd unit"
   export XDG_RUNTIME_DIR="\${XDG_RUNTIME_DIR:-/run/user/\$(id -u)}"
   mkdir -p "\$HOME/.config/systemd/user"
   if [[ -f deploy/vitalych.user.service ]]; then
@@ -141,24 +159,28 @@ elif command -v systemctl >/dev/null 2>&1; then
     sed -i "s|WorkingDirectory=.*|WorkingDirectory=\$DIR|; s|ExecStart=.*/uvicorn|ExecStart=\$DIR/.venv/bin/uvicorn|" \
       "\$HOME/.config/systemd/user/vitalych.service" || true
   fi
-  # Free port from any previous nohup instance
-  if command -v fuser >/dev/null 2>&1; then
-    fuser -k 8080/tcp >/dev/null 2>&1 || true
-  elif command -v lsof >/dev/null 2>&1; then
-    pid=\$(lsof -t -iTCP:8080 -sTCP:LISTEN 2>/dev/null || true)
-    if [[ -n "\${pid:-}" ]]; then
-      kill \$pid 2>/dev/null || true
-      sleep 1
-    fi
-  fi
   systemctl --user daemon-reload
   systemctl --user enable vitalych.service
-  systemctl --user restart vitalych.service
   # Persist across logout/reboot when allowed (needs root once)
   loginctl enable-linger "\$(whoami)" 2>/dev/null || true
+  OLD_PID="\$(systemctl --user show -p MainPID --value vitalych.service 2>/dev/null || echo 0)"
+  # Do not fuser-kill before restart: it races with systemd and can leave
+  # the previous unit running while health checks still pass on :8080.
+  systemctl --user restart vitalych.service
   sleep 1
+  NEW_PID="\$(systemctl --user show -p MainPID --value vitalych.service)"
+  echo "    PID \$OLD_PID -> \$NEW_PID"
   systemctl --user --no-pager --full status vitalych.service || true
+  if [[ -z "\$NEW_PID" || "\$NEW_PID" == 0 ]]; then
+    echo "user unit failed to start" >&2
+    exit 1
+  fi
+  if [[ "\$OLD_PID" != 0 && "\$NEW_PID" == "\$OLD_PID" ]]; then
+    echo "user unit PID did not change after restart" >&2
+    exit 1
+  fi
 else
+  echo "==> no systemd; restarting via nohup"
   if command -v fuser >/dev/null 2>&1; then
     fuser -k 8080/tcp >/dev/null 2>&1 || true
   elif command -v lsof >/dev/null 2>&1; then

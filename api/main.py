@@ -480,12 +480,22 @@ def _mount_frontend() -> None:
     if assets_dir.is_dir():
         app.mount("/assets", StaticFiles(directory=assets_dir), name="assets")
 
-    @app.get("/")
-    async def spa_index() -> FileResponse:
+    def _index_response() -> FileResponse:
         index = DIST_DIR / "index.html"
         if not index.is_file():
             raise HTTPException(status_code=404, detail="Frontend not built (web/dist missing)")
-        return FileResponse(index)
+        # Avoid stale SPA shell after deploy (hashed assets are immutable).
+        return FileResponse(
+            index,
+            headers={
+                "Cache-Control": "no-cache, no-store, must-revalidate",
+                "Pragma": "no-cache",
+            },
+        )
+
+    @app.get("/")
+    async def spa_index() -> FileResponse:
+        return _index_response()
 
     @app.get("/{full_path:path}")
     async def spa_fallback(full_path: str) -> FileResponse:
@@ -494,10 +504,7 @@ def _mount_frontend() -> None:
         candidate = DIST_DIR / full_path
         if candidate.is_file():
             return FileResponse(candidate)
-        index = DIST_DIR / "index.html"
-        if index.is_file():
-            return FileResponse(index)
-        raise HTTPException(status_code=404, detail="Frontend not built (web/dist missing)")
+        return _index_response()
 
 
 _mount_frontend()
