@@ -39,6 +39,7 @@ from src.project_store import (
     update_project,
     update_version,
 )
+from src.preview import preview_document
 from src.render import parse_formats, render_document_content, selected_keys
 from src.style_profile import load_style_profile_text
 
@@ -84,6 +85,17 @@ class VersionPutBody(BaseModel):
 class RenderBody(BaseModel):
     template: RenderTemplate = "all"
     format: RenderFormat = "both"
+
+
+PreviewTemplate = Literal["tz", "pz"]
+
+
+class PreviewBody(BaseModel):
+    template: PreviewTemplate = "tz"
+    data: dict[str, Any] | None = None
+    template_tz: str | None = None
+    template_pz: str | None = None
+    style_profile: str | None = None
 
 
 _DEFAULT_CORS_ORIGINS = (
@@ -396,6 +408,47 @@ def api_delete_version(project_id: uuid.UUID, version_id: uuid.UUID) -> dict[str
     except HTTPException:
         raise
     except (SQLAlchemyError, OSError) as e:
+        raise HTTPException(status_code=503, detail="Database unavailable") from e
+
+
+@app.post("/api/projects/{project_id}/preview")
+def api_preview(project_id: uuid.UUID, body: PreviewBody = PreviewBody()) -> dict[str, Any]:
+    try:
+        with get_session() as session:
+            project = _require_project(session, project_id)
+            data = body.data if body.data is not None else project.data
+            template_tz = body.template_tz if body.template_tz is not None else project.template_tz
+            template_pz = body.template_pz if body.template_pz is not None else project.template_pz
+            style_profile_text = (
+                body.style_profile if body.style_profile is not None else project.style_profile
+            )
+
+        result = preview_document(
+            body.template,
+            data,
+            template_tz,
+            template_pz,
+            style_profile_text=style_profile_text,
+        )
+        return result.as_dict()
+    except HTTPException:
+        raise
+    except UndefinedError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "undefined"},
+        ) from e
+    except TemplateNotFound as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "template"},
+        ) from e
+    except (ValueError, yaml.YAMLError) as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "other"},
+        ) from e
+    except SQLAlchemyError as e:
         raise HTTPException(status_code=503, detail="Database unavailable") from e
 
 

@@ -10,6 +10,7 @@ from pathlib import Path
 import yaml
 from jinja2 import DictLoader, Environment, FileSystemLoader, StrictUndefined, TemplateNotFound, UndefinedError
 
+from src.cases import make_case_filter, prepare_render_data
 from src.db import get_session
 from src.md_to_docx import markdown_to_docx
 from src.project_store import get_project, get_project_by_slug
@@ -72,6 +73,50 @@ def _write_rendered(
     return written
 
 
+def render_markdown_from_files(
+    template_key: str,
+    data: dict,
+    templates_dir: Path,
+) -> str:
+    if template_key not in TEMPLATE_MAP:
+        raise ValueError(f"Unknown template: {template_key}")
+    j2_name, _stem = TEMPLATE_MAP[template_key]
+    j2_path = templates_dir / j2_name
+    if not j2_path.is_file():
+        raise FileNotFoundError(f"Template not found: {j2_path}")
+
+    wrapped, warnings = prepare_render_data(data)
+    env = Environment(
+        loader=FileSystemLoader(str(templates_dir)),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    env.filters["case"] = make_case_filter(warnings)
+    return env.get_template(j2_name).render(**wrapped)
+
+
+def render_markdown_content(
+    template_key: str,
+    data: dict,
+    template_tz: str,
+    template_pz: str,
+) -> str:
+    """Render Jinja template to Markdown string (no disk I/O)."""
+    if template_key not in TEMPLATE_MAP:
+        raise ValueError(f"Unknown template: {template_key}")
+    j2_name, _stem = TEMPLATE_MAP[template_key]
+    wrapped, warnings = prepare_render_data(data)
+    env = Environment(
+        loader=DictLoader({"tz.md.j2": template_tz, "pz.md.j2": template_pz}),
+        undefined=StrictUndefined,
+        trim_blocks=True,
+        lstrip_blocks=True,
+    )
+    env.filters["case"] = make_case_filter(warnings)
+    return env.get_template(j2_name).render(**wrapped)
+
+
 def render_document(
     template_key: str,
     data: dict,
@@ -81,21 +126,8 @@ def render_document(
     style_profile: dict | None = None,
     style_profile_path: Path | None = None,
 ) -> list[Path]:
-    if template_key not in TEMPLATE_MAP:
-        raise ValueError(f"Unknown template: {template_key}")
     formats = formats or {"md", "docx"}
-    j2_name, _stem = TEMPLATE_MAP[template_key]
-    j2_path = templates_dir / j2_name
-    if not j2_path.is_file():
-        raise FileNotFoundError(f"Template not found: {j2_path}")
-
-    env = Environment(
-        loader=FileSystemLoader(str(templates_dir)),
-        undefined=StrictUndefined,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-    text = env.get_template(j2_name).render(**data)
+    text = render_markdown_from_files(template_key, data, templates_dir)
     return _write_rendered(
         template_key,
         text,
@@ -117,17 +149,8 @@ def render_document_content(
     style_profile: dict | None = None,
     style_profile_text: str | None = None,
 ) -> list[Path]:
-    if template_key not in TEMPLATE_MAP:
-        raise ValueError(f"Unknown template: {template_key}")
     formats = formats or {"md", "docx"}
-    j2_name, _stem = TEMPLATE_MAP[template_key]
-    env = Environment(
-        loader=DictLoader({"tz.md.j2": template_tz, "pz.md.j2": template_pz}),
-        undefined=StrictUndefined,
-        trim_blocks=True,
-        lstrip_blocks=True,
-    )
-    text = env.get_template(j2_name).render(**data)
+    text = render_markdown_content(template_key, data, template_tz, template_pz)
     return _write_rendered(
         template_key,
         text,
