@@ -6,6 +6,7 @@ import {
   getByPath,
   isCustomField,
   jinjaForSlug,
+  readNominative,
   listFieldsOf,
   listToStrings,
   setByPath,
@@ -250,7 +251,7 @@ export function VariablesPanel({ data, onChange }: Props) {
           >
             {textFields.map((field) => {
               const raw = getByPath(data, field.path)
-              const value = raw == null ? '' : String(raw)
+              const value = readNominative(raw)
               return (
                 <TextFieldCard
                   key={field.slug}

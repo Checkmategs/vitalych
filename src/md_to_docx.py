@@ -417,6 +417,7 @@ def markdown_to_docx(
     out_path: Path,
     profile: dict | None = None,
     style_profile_path: Path | None = None,
+    data: dict | None = None,
 ) -> Path:
     if profile is None:
         if style_profile_path is None:
@@ -488,4 +489,7 @@ def markdown_to_docx(
             i += 1
         builder.add_paragraph(" ".join(para_parts))
 
+    from src.docx_frame import apply_frame
+
+    apply_frame(builder.doc, profile, data)
     return builder.save(out_path)

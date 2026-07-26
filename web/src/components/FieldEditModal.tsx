@@ -1,10 +1,17 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
+  ALL_CASE_KEYS,
+  CASE_LABELS,
+  DEFAULT_CASE_KEYS,
   appendListItem,
   listToStrings,
+  readCases,
+  readNominative,
   removeListItem,
   updateListItemLabel,
   validateNewField,
+  writeCasedText,
+  type CaseKey,
   type FieldDef,
 } from '../schema/fields'
 
@@ -96,27 +103,79 @@ function blankListItem(previous: unknown): unknown {
 }
 
 function TextValueEditor({
-  value,
+  rawValue,
   onChange,
   autoFocus,
 }: {
-  value: string
-  onChange: (v: string) => void
+  rawValue: unknown
+  onChange: (v: unknown) => void
   autoFocus?: boolean
 }) {
+  const nominative = readNominative(rawValue)
+  const cases = readCases(rawValue)
+  const [casesOpen, setCasesOpen] = useState(
+    () => Object.keys(cases).length > 0,
+  )
+  const [showAllCases, setShowAllCases] = useState(
+    () => ALL_CASE_KEYS.some((k) => !DEFAULT_CASE_KEYS.includes(k) && Boolean(cases[k])),
+  )
+  const visibleKeys: CaseKey[] = showAllCases ? ALL_CASE_KEYS : DEFAULT_CASE_KEYS
+
+  const setNominative = (next: string) => {
+    onChange(writeCasedText(next, cases))
+  }
+
+  const setCase = (key: CaseKey, next: string) => {
+    onChange(writeCasedText(nominative, { ...cases, [key]: next }))
+  }
+
   return (
     <div className="field-modal-value">
       <textarea
         className="field-modal-textarea"
         rows={6}
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
+        value={nominative}
+        onChange={(e) => setNominative(e.target.value)}
         autoFocus={autoFocus}
       />
       <div className="field-modal-value-footer">
-        <StubLink>Настроить падежи</StubLink>
+        <button
+          type="button"
+          className="field-modal-stub"
+          onClick={() => setCasesOpen((v) => !v)}
+        >
+          {casesOpen ? 'Скрыть падежи' : 'Настроить падежи'}
+        </button>
         <StubLink className="field-modal-stub field-modal-stub--history">↻ История</StubLink>
       </div>
+      {casesOpen ? (
+        <div className="field-modal-cases">
+          {visibleKeys.map((key) => (
+            <label key={key} className="field-modal-case-row">
+              <span className="field-modal-case-label">{CASE_LABELS[key]}</span>
+              <input
+                className="field-modal-case-input"
+                type="text"
+                value={cases[key] ?? ''}
+                placeholder={nominative || '—'}
+                onChange={(e) => setCase(key, e.target.value)}
+              />
+            </label>
+          ))}
+          {!showAllCases ? (
+            <button
+              type="button"
+              className="field-modal-stub"
+              onClick={() => setShowAllCases(true)}
+            >
+              Ещё падежи…
+            </button>
+          ) : null}
+          <p className="field-modal-case-hint">
+            В шаблоне: <code>{'{{ field | case(\'gen\') }}'}</code>
+          </p>
+        </div>
+      ) : null}
     </div>
   )
 }
@@ -350,7 +409,7 @@ function CreateFieldModal({
 
   const setKind = (kind: FieldDef['kind']) => {
     setDraft((d) => ({ ...d, kind }))
-    setValue(kind === 'list' ? [] : typeof value === 'string' ? value : '')
+    setValue(kind === 'list' ? [] : writeCasedText(readNominative(value), readCases(value)))
   }
 
   const submit = () => {
@@ -384,13 +443,9 @@ function CreateFieldModal({
         ? Array.isArray(value)
           ? value
           : []
-        : value == null
-          ? ''
-          : String(value)
+        : writeCasedText(readNominative(value), readCases(value))
     onCreate(def, initial)
   }
-
-  const textValue = value == null ? '' : String(value)
 
   return (
     <div className="field-modal-overlay" role="presentation" onClick={onClose}>
@@ -437,7 +492,7 @@ function CreateFieldModal({
             {draft.kind === 'list' ? (
               <ListValueEditor rawList={value} onChangeRaw={(next) => setValue(next)} />
             ) : (
-              <TextValueEditor value={textValue} onChange={setValue} />
+              <TextValueEditor rawValue={value} onChange={setValue} />
             )}
           </ModalAccordion>
 
@@ -475,7 +530,6 @@ function EditFieldModal({
   onDelete?: () => void
 }) {
   const settingsOpen = field.kind !== 'list'
-  const textValue = value == null ? '' : String(value)
   const [slugDraft, setSlugDraft] = useState(field.slug)
   const [labelDraft, setLabelDraft] = useState(field.label)
   const [kindDraft, setKindDraft] = useState(field.kind)
@@ -591,7 +645,7 @@ function EditFieldModal({
             {kindDraft === 'list' || (!settingsEditable && field.kind === 'list') ? (
               <ListValueEditor rawList={value} onChangeRaw={(next) => onChange(next)} />
             ) : (
-              <TextValueEditor value={textValue} onChange={(v) => onChange(v)} autoFocus />
+              <TextValueEditor rawValue={value} onChange={onChange} autoFocus />
             )}
           </ModalAccordion>
         </div>

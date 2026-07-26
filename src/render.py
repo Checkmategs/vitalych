@@ -48,6 +48,7 @@ def _write_rendered(
     style_profile: dict | None,
     style_profile_path: Path | None,
     style_profile_text: str | None,
+    data: dict | None = None,
 ) -> list[Path]:
     _, stem = TEMPLATE_MAP[template_key]
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -68,7 +69,7 @@ def _write_rendered(
                     "style_profile_text, or style_profile_path"
                 )
         docx_path = out_dir / f"{stem}.docx"
-        markdown_to_docx(text, docx_path, profile=style_profile)
+        markdown_to_docx(text, docx_path, profile=style_profile, data=data)
         written.append(docx_path)
     return written
 
@@ -136,6 +137,7 @@ def render_document(
         style_profile,
         style_profile_path,
         style_profile_text=None,
+        data=data,
     )
 
 
@@ -159,6 +161,7 @@ def render_document_content(
         style_profile,
         style_profile_path=None,
         style_profile_text=style_profile_text,
+        data=data,
     )
 
 
@@ -259,7 +262,11 @@ def main(argv: list[str] | None = None) -> int:
 
                 out_dir = args.out
                 if out_dir == Path("out"):
-                    out_dir = Path("out") / project.slug
+                    from src.artifacts import get_artifact_store
+
+                    out_dir = get_artifact_store(Path("out")).dir_for(
+                        project.workspace_id, project.slug
+                    )
 
                 for key in selected_keys(args.template):
                     written.extend(

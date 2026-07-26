@@ -13,6 +13,24 @@ class Base(DeclarativeBase):
     pass
 
 
+# Stable id for the single local workspace (seeded by migration).
+LOCAL_WORKSPACE_ID = uuid.UUID("00000000-0000-4000-8000-000000000001")
+
+
+class Workspace(Base):
+    __tablename__ = "workspaces"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    projects: Mapped[list["Project"]] = relationship(back_populates="workspace")
+
+
 class Project(Base):
     __tablename__ = "projects"
     __table_args__ = (
@@ -25,6 +43,12 @@ class Project(Base):
     )
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True),
+        ForeignKey("workspaces.id", ondelete="RESTRICT"),
+        nullable=False,
+        default=LOCAL_WORKSPACE_ID,
+    )
     slug: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     data: Mapped[dict[str, Any]] = mapped_column(JSONB, nullable=False)
@@ -52,6 +76,7 @@ class Project(Base):
         onupdate=func.now(),
     )
 
+    workspace: Mapped[Workspace] = relationship(back_populates="projects")
     versions: Mapped[list[ProjectVersion]] = relationship(
         back_populates="project",
         cascade="all, delete-orphan",

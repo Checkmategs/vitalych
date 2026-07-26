@@ -87,6 +87,10 @@ function formatApiDetail(detail: unknown): string {
       .join('; ')
   }
   if (detail != null && typeof detail === 'object') {
+    const obj = detail as { message?: unknown; kind?: unknown }
+    if (typeof obj.message === 'string' && obj.message.trim()) {
+      return obj.kind ? `${obj.message} (${String(obj.kind)})` : obj.message
+    }
     try {
       return JSON.stringify(detail)
     } catch {
@@ -227,6 +231,39 @@ export async function renderProject(
     body: JSON.stringify({ template, format }),
   })
   return parseJson<{ written: string[] }>(res)
+}
+
+export type PreviewWarning = {
+  code: string
+  message: string
+  path?: string
+}
+
+export type PreviewResult = {
+  markdown: string
+  html: string
+  warnings: PreviewWarning[]
+  frame_preset: string
+}
+
+export type PreviewBody = {
+  template: TemplateKey
+  data?: ProjectData
+  template_tz?: string
+  template_pz?: string
+  style_profile?: string
+}
+
+export async function previewProject(
+  projectId: string,
+  body: PreviewBody,
+): Promise<PreviewResult> {
+  const res = await fetch(`/api/projects/${encodeURIComponent(projectId)}/preview`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  })
+  return parseJson<PreviewResult>(res)
 }
 
 export async function fetchDocxBlob(projectId: string, filename: string): Promise<Blob> {
