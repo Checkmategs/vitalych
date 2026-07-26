@@ -190,10 +190,15 @@ export default function App() {
     setDirty(true)
   }
 
-  const flushDirtyVersion = async () => {
-    if (!projectId || !activeVersionId || !dirty) return
+  /** Persist dirty editor state before navigation; project PUT if no active version. */
+  const flushDirty = async () => {
+    if (!projectId || !dirty) return
     const payload = editorPayload()
-    await putVersion(projectId, activeVersionId, payload)
+    if (activeVersionId) {
+      await putVersion(projectId, activeVersionId, payload)
+    } else {
+      await putProject(projectId, payload)
+    }
     setDirty(false)
   }
 
@@ -202,8 +207,8 @@ export default function App() {
     setLoading(true)
     setError(null)
     try {
-      if (dirty && projectId && activeVersionId) {
-        await flushDirtyVersion()
+      if (dirty && projectId) {
+        await flushDirty()
       }
       await openProject(id, doc)
     } catch (e) {
@@ -219,9 +224,8 @@ export default function App() {
     if (!projectId || versionId === activeVersionId) return
     setLoading(true)
     try {
-      if (dirty && activeVersionId) {
-        await putVersion(projectId, activeVersionId, editorPayload())
-        setDirty(false)
+      if (dirty) {
+        await flushDirty()
       }
       const full = await activateVersion(projectId, versionId)
       applyProject(full, doc)
@@ -241,8 +245,8 @@ export default function App() {
     if (!trimmed) return
     setLoading(true)
     try {
-      if (dirty && projectId && activeVersionId) {
-        await flushDirtyVersion()
+      if (dirty && projectId) {
+        await flushDirty()
       }
       const created = await createProject({ name: trimmed })
       setProjects((prev) => {
@@ -376,8 +380,8 @@ export default function App() {
     if (label == null) return
     setLoading(true)
     try {
-      if (dirty && activeVersionId) {
-        await putVersion(projectId, activeVersionId, editorPayload())
+      if (dirty) {
+        await flushDirty()
       }
       const payload = editorPayload()
       const created = await createVersion(projectId, {

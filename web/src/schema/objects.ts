@@ -1,5 +1,7 @@
 /** Typed object instances in project.yaml (builtin module + user types in `_ui.object_types`). */
 
+import { FIELD_DEFS } from './fields'
+
 export type ChildAttrKind = 'text' | 'list'
 
 export type ChildAttrDef = {
@@ -165,7 +167,36 @@ export function isValidObjectKey(key: string): boolean {
   return KEY_PATTERN.test(key)
 }
 
-export type ObjectTypeError = 'key' | 'label' | 'duplicate' | 'attrs' | 'child' | null
+export type ObjectTypeError =
+  | 'key'
+  | 'label'
+  | 'duplicate'
+  | 'conflict'
+  | 'attrs'
+  | 'child'
+  | null
+
+/** Roots reserved for document YAML / builtins — must not become object-type lists. */
+export function reservedObjectRootKeys(): Set<string> {
+  const keys = new Set<string>(['_ui', 'meta'])
+  for (const f of FIELD_DEFS) {
+    if (f.path[0]) keys.add(f.path[0])
+  }
+  for (const t of BUILTIN_OBJECT_TYPES) keys.add(t.key)
+  return keys
+}
+
+function rootKeyConflicts(
+  data: Record<string, unknown>,
+  key: string,
+  excludeKey?: string,
+): boolean {
+  if (key === excludeKey) return false
+  if (reservedObjectRootKeys().has(key)) return true
+  const existing = data[key]
+  if (existing !== undefined && existing !== null && !Array.isArray(existing)) return true
+  return false
+}
 
 export function validateObjectTypeDraft(
   data: Record<string, unknown>,
@@ -186,6 +217,7 @@ export function validateObjectTypeDraft(
   if (!isValidObjectKey(key)) return 'key'
   const existing = readObjectTypes(data)
   if (existing.some((t) => t.key === key && t.key !== excludeKey)) return 'duplicate'
+  if (rootKeyConflicts(data, key, excludeKey)) return 'conflict'
   if (draft.mode === 'flat') {
     if (draft.attrs.length === 0) return 'attrs'
     if (draft.attrs.some((a) => !ATTR_CODE_PATTERN.test(a.code) || !a.label.trim())) return 'attrs'
@@ -277,7 +309,9 @@ export function deleteObjectType(
   const users = readUserObjectTypes(data)
   if (!users.some((t) => t.key === key)) return data
   const nextUsers = users.filter((t) => t.key !== key)
-  let next = writeUserTypes(data, nextUsers)
+  const next = writeUserTypes(data, nextUsers)
+  // Only drop the data key when it is an object-list (never delete scalar/object roots).
+  if (!Array.isArray(next[key])) return next
   const { [key]: _removed, ...rest } = next
   return rest
 }

@@ -304,13 +304,15 @@ export function VariablesPanel({ data, onChange }: Props) {
           mode="create"
           initialKind={modal.initialKind}
           existingSlugs={existingSlugs}
+          data={data}
           onCreate={(def, initialValue) => {
-            const { data: next } = createCustomField(
+            const created = createCustomField(
               data,
               { slug: def.slug, label: def.label, kind: def.kind },
               initialValue,
             )
-            onChange(next)
+            if (!created) return
+            onChange(created.data)
             setModal(null)
           }}
           onClose={() => setModal(null)}
@@ -328,6 +330,7 @@ export function VariablesPanel({ data, onChange }: Props) {
             if (err === 'label') return 'Укажите название'
             if (err === 'slug') return 'Код: латиница, цифры, _, сегменты через точку'
             if (err === 'duplicate') return 'Поле с таким кодом уже есть'
+            if (err === 'conflict') return 'Код пересекается с существующими полями данных'
             const result = updateCustomField(data, modal.field.slug, draft)
             if (!result) return 'Не удалось обновить поле'
             onChange(result.data)

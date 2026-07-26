@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import sys
 import uuid
 from datetime import datetime
@@ -14,7 +15,7 @@ from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 
@@ -49,7 +50,7 @@ RenderFormat = Literal["md", "docx", "both"]
 
 
 class ProjectCreateBody(BaseModel):
-    name: str
+    name: str = Field(min_length=1)
     slug: str | None = None
 
 
@@ -85,16 +86,21 @@ class RenderBody(BaseModel):
     format: RenderFormat = "both"
 
 
+_DEFAULT_CORS_ORIGINS = (
+    "http://localhost:5173,http://127.0.0.1:5173,"
+    "http://localhost:8080,http://127.0.0.1:8080"
+)
+
+
+def _cors_origins() -> list[str]:
+    raw = os.environ.get("CORS_ORIGINS", _DEFAULT_CORS_ORIGINS)
+    return [o.strip() for o in raw.split(",") if o.strip()]
+
+
 app = FastAPI(title="Vitalych API")
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:5173",
-        "http://127.0.0.1:5173",
-        "http://localhost:8080",
-        "http://127.0.0.1:8080",
-        "http://10.91.0.142:8080",
-    ],
+    allow_origins=_cors_origins(),
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

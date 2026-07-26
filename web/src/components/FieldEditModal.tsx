@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react'
 import {
   appendListItem,
-  isValidSlug,
   listToStrings,
   removeListItem,
   updateListItemLabel,
+  validateNewField,
   type FieldDef,
 } from '../schema/fields'
 
@@ -31,6 +31,7 @@ type CreateProps = {
   mode: 'create'
   initialKind: FieldDef['kind']
   existingSlugs: Set<string>
+  data: Record<string, unknown>
   onCreate: (def: FieldDef, initialValue: unknown) => void
   onClose: () => void
 }
@@ -321,11 +322,13 @@ function FieldSettings({
 function CreateFieldModal({
   initialKind,
   existingSlugs,
+  data,
   onCreate,
   onClose,
 }: {
   initialKind: FieldDef['kind']
   existingSlugs: Set<string>
+  data: Record<string, unknown>
   onCreate: (def: FieldDef, initialValue: unknown) => void
   onClose: () => void
 }) {
@@ -353,16 +356,25 @@ function CreateFieldModal({
   const submit = () => {
     const slug = draft.slug.trim()
     const label = draft.label.trim()
-    if (!label) {
+    const err = validateNewField(data, { slug, label, kind: draft.kind })
+    if (err === 'label') {
       setError('Укажите название')
       return
     }
-    if (!isValidSlug(slug)) {
+    if (err === 'slug') {
       setError('Код: латиница, цифры, _, сегменты через точку')
       return
     }
-    if (existingSlugs.has(slug)) {
+    if (err === 'duplicate' || existingSlugs.has(slug)) {
       setError('Поле с таким кодом уже есть')
+      return
+    }
+    if (err === 'conflict') {
+      setError('Код пересекается с существующими полями данных')
+      return
+    }
+    if (err) {
+      setError('Ошибка')
       return
     }
     const path = slug.split('.').filter(Boolean)
@@ -594,6 +606,7 @@ export function FieldEditModal(props: Props) {
       <CreateFieldModal
         initialKind={props.initialKind}
         existingSlugs={props.existingSlugs}
+        data={props.data}
         onCreate={props.onCreate}
         onClose={props.onClose}
       />

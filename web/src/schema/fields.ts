@@ -163,7 +163,59 @@ export function findField(data: Record<string, unknown>, slug: string): FieldDef
   return allFields(data).find((f) => f.slug === slug)
 }
 
-export type FieldCreateError = 'slug' | 'label' | 'duplicate' | null
+export type FieldCreateError = 'slug' | 'label' | 'duplicate' | 'conflict' | null
+
+/** True when one path equals or is a strict prefix of the other. */
+export function pathsConflict(a: string[], b: string[]): boolean {
+  const n = Math.min(a.length, b.length)
+  for (let i = 0; i < n; i++) {
+    if (a[i] !== b[i]) return false
+  }
+  return true
+}
+
+function pathsEqual(a: string[], b: string[]): boolean {
+  return a.length === b.length && a.every((seg, i) => seg === b[i])
+}
+
+/** Object-type list roots (builtin module + `_ui.object_types`) — avoid circular import. */
+function objectTypeRootKeys(data: Record<string, unknown>): Set<string> {
+  const keys = new Set<string>(['module'])
+  const ui = asRecord(data[UI_KEY])
+  const list = ui?.object_types
+  if (!Array.isArray(list)) return keys
+  for (const item of list) {
+    const obj = asRecord(item)
+    const key = typeof obj?.key === 'string' ? obj.key.trim() : ''
+    if (key) keys.add(key)
+  }
+  return keys
+}
+
+function pathCollidesWithFields(
+  path: string[],
+  data: Record<string, unknown>,
+  excludeSlug?: string,
+): boolean {
+  if (path.length === 0 || path[0] === UI_KEY) return true
+  // Nested paths under object-type roots would replace the instance list via setByPath.
+  if (objectTypeRootKeys(data).has(path[0])) return true
+
+  let excludedPath: string[] | null = null
+  for (const f of allFields(data)) {
+    if (excludeSlug && f.slug === excludeSlug) {
+      excludedPath = f.path
+      continue
+    }
+    if (pathsConflict(path, f.path)) return true
+  }
+  // Refuse overwriting an existing object/array subtree (e.g. meta),
+  // but not the field's own value when updating that same path (list fields).
+  if (excludedPath && pathsEqual(excludedPath, path)) return false
+  const at = getByPath(data, path)
+  if (at != null && typeof at === 'object') return true
+  return false
+}
 
 export function validateNewField(
   data: Record<string, unknown>,
@@ -174,6 +226,7 @@ export function validateNewField(
   if (!label) return 'label'
   if (!isValidSlug(slug)) return 'slug'
   if (allFields(data).some((f) => f.slug === slug)) return 'duplicate'
+  if (pathCollidesWithFields(pathFromSlug(slug), data)) return 'conflict'
   return null
 }
 
@@ -182,7 +235,8 @@ export function createCustomField(
   data: Record<string, unknown>,
   draft: { slug: string; label: string; kind: FieldDef['kind'] },
   initialValue?: unknown,
-): { data: Record<string, unknown>; field: FieldDef } {
+): { data: Record<string, unknown>; field: FieldDef } | null {
+  if (validateNewField(data, draft) != null) return null
   const slug = draft.slug.trim()
   const label = draft.label.trim()
   const path = pathFromSlug(slug)
@@ -263,6 +317,7 @@ export function validateFieldUpdate(
   if (!label) return 'label'
   if (!isValidSlug(slug)) return 'slug'
   if (slug !== oldSlug && allFields(data).some((f) => f.slug === slug)) return 'duplicate'
+  if (pathCollidesWithFields(pathFromSlug(slug), data, oldSlug)) return 'conflict'
   return null
 }
 
@@ -275,6 +330,7 @@ export function updateCustomField(
   oldSlug: string,
   draft: { slug: string; label: string; kind: FieldDef['kind'] },
 ): { data: Record<string, unknown>; field: FieldDef } | null {
+  if (validateFieldUpdate(data, oldSlug, draft) != null) return null
   const custom = readCustomFields(data)
   const idx = custom.findIndex((f) => f.slug === oldSlug)
   if (idx < 0) return null

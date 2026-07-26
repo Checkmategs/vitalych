@@ -16,3 +16,5 @@
 - **Backend:** Python, FastAPI, SQLAlchemy, Alembic, PostgreSQL
 - **Frontend:** React (Vite)
 - **Документы:** Markdown → DOCX
+
+`ui/` (Streamlit) — legacy-редактор YAML на диске; актуальный путь — React `web/` + API + Postgres.

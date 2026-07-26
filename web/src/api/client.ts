@@ -65,12 +65,44 @@ export type VersionPutBody = {
   note?: string
 }
 
+function formatApiDetail(detail: unknown): string {
+  if (typeof detail === 'string') return detail
+  if (Array.isArray(detail)) {
+    return detail
+      .map((item) => {
+        if (typeof item === 'string') return item
+        if (item != null && typeof item === 'object' && 'msg' in item) {
+          const msg = (item as { msg?: unknown }).msg
+          const loc = (item as { loc?: unknown }).loc
+          const where = Array.isArray(loc) ? loc.join('.') : ''
+          return where ? `${where}: ${String(msg)}` : String(msg)
+        }
+        try {
+          return JSON.stringify(item)
+        } catch {
+          return String(item)
+        }
+      })
+      .filter(Boolean)
+      .join('; ')
+  }
+  if (detail != null && typeof detail === 'object') {
+    try {
+      return JSON.stringify(detail)
+    } catch {
+      return String(detail)
+    }
+  }
+  return ''
+}
+
 async function parseJson<T>(res: Response): Promise<T> {
   if (!res.ok) {
     let detail = res.statusText
     try {
-      const body = (await res.json()) as { detail?: string }
-      if (body.detail) detail = body.detail
+      const body = (await res.json()) as { detail?: unknown }
+      const formatted = formatApiDetail(body.detail)
+      if (formatted) detail = formatted
     } catch {
       /* ignore */
     }
@@ -205,8 +237,9 @@ export async function fetchDocxBlob(projectId: string, filename: string): Promis
   if (!res.ok) {
     let detail = res.statusText
     try {
-      const body = (await res.json()) as { detail?: string }
-      if (body.detail) detail = body.detail
+      const body = (await res.json()) as { detail?: unknown }
+      const formatted = formatApiDetail(body.detail)
+      if (formatted) detail = formatted
     } catch {
       /* ignore */
     }
