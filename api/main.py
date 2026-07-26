@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any, Literal
 
 import yaml
-from jinja2 import TemplateNotFound, UndefinedError
+from jinja2 import TemplateError, TemplateNotFound, TemplateSyntaxError, UndefinedError
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, JSONResponse
@@ -439,10 +439,15 @@ def api_preview(project_id: uuid.UUID, body: PreviewBody = PreviewBody()) -> dic
             status_code=400,
             detail={"message": str(e), "kind": "undefined"},
         ) from e
-    except TemplateNotFound as e:
+    except (TemplateSyntaxError, TemplateNotFound) as e:
         raise HTTPException(
             status_code=400,
             detail={"message": str(e), "kind": "template"},
+        ) from e
+    except TemplateError as e:
+        raise HTTPException(
+            status_code=400,
+            detail={"message": str(e), "kind": "other"},
         ) from e
     except (ValueError, yaml.YAMLError) as e:
         raise HTTPException(
@@ -491,7 +496,11 @@ def api_render(project_id: uuid.UUID, body: RenderBody = RenderBody()) -> dict[s
         raise
     except FileNotFoundError as e:
         raise HTTPException(status_code=404, detail=str(e)) from e
-    except (ValueError, yaml.YAMLError, UndefinedError, TemplateNotFound, OSError) as e:
+    except UndefinedError as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (TemplateSyntaxError, TemplateNotFound, TemplateError) as e:
+        raise HTTPException(status_code=400, detail=str(e)) from e
+    except (ValueError, yaml.YAMLError, OSError) as e:
         raise HTTPException(status_code=400, detail=str(e)) from e
     except SQLAlchemyError as e:
         raise HTTPException(status_code=503, detail="Database unavailable") from e

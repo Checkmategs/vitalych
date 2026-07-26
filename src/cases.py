@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any
 
 CASE_KEYS = ("gen", "dat", "acc", "ins", "pre")
@@ -22,20 +22,27 @@ class CaseWarning:
         return out
 
 
-@dataclass
-class CasedValue:
-    """Jinja-printable nominative with optional case forms."""
+class CasedValue(str):
+    """Nominative string subclass so Jinja `is string` / fill() macros keep working."""
 
-    value: str
-    cases: dict[str, str] = field(default_factory=dict)
-    path: str = ""
-    warnings: list[CaseWarning] | None = None
+    __slots__ = ("cases", "path", "warnings")
 
-    def __str__(self) -> str:
-        return self.value
+    def __new__(
+        cls,
+        value: str,
+        cases: dict[str, str] | None = None,
+        path: str = "",
+        warnings: list[CaseWarning] | None = None,
+    ) -> CasedValue:
+        obj = str.__new__(cls, value)
+        obj.cases = cases or {}
+        obj.path = path
+        obj.warnings = warnings
+        return obj
 
-    def __html__(self) -> str:
-        return self.value
+    @property
+    def value(self) -> str:
+        return str.__str__(self)
 
     def for_case(self, case_key: str) -> str:
         key = (case_key or "nom").strip().lower()
@@ -62,7 +69,12 @@ def is_cased_dict(value: Any) -> bool:
         return False
     if "value" not in value or not isinstance(value.get("value"), str):
         return False
-    return set(value.keys()) <= _WRAP_KEYS
+    if not set(value.keys()) <= _WRAP_KEYS:
+        return False
+    cases = value.get("cases")
+    if cases is None:
+        return True
+    return isinstance(cases, dict)
 
 
 def nominative(value: Any) -> str:
@@ -78,7 +90,6 @@ def nominative(value: Any) -> str:
 def apply_case(value: Any, case_key: str, warnings: list[CaseWarning] | None = None) -> str:
     key = (case_key or "nom").strip().lower()
     if isinstance(value, CasedValue):
-        # temporarily attach warnings list if provided
         prev = value.warnings
         if warnings is not None:
             value.warnings = warnings
@@ -88,11 +99,12 @@ def apply_case(value: Any, case_key: str, warnings: list[CaseWarning] | None = N
             value.warnings = prev
 
     if is_cased_dict(value):
+        cases_raw = value.get("cases") or {}
         wrapped = CasedValue(
-            value=value["value"],
+            value["value"],
             cases={
                 str(k): str(v)
-                for k, v in (value.get("cases") or {}).items()
+                for k, v in cases_raw.items()
                 if isinstance(k, str) and isinstance(v, str)
             },
             warnings=warnings,
@@ -121,7 +133,7 @@ def _wrap_node(value: Any, path: str, warnings: list[CaseWarning]) -> Any:
             for k, v in cases_raw.items()
             if isinstance(k, str) and isinstance(v, str) and k in CASE_KEYS
         }
-        return CasedValue(value=value["value"], cases=cases, path=path, warnings=warnings)
+        return CasedValue(value["value"], cases=cases, path=path, warnings=warnings)
     if isinstance(value, dict):
         return {
             k: _wrap_node(v, f"{path}.{k}" if path else str(k), warnings)

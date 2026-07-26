@@ -70,12 +70,7 @@ def _render_with_warnings(
 
 def markdown_to_html(md_text: str, frame_preset: str = "none") -> str:
     body = markdown.markdown(md_text, extensions=_MD_EXTENSIONS)
-    preset = (
-        frame_preset
-        if frame_preset in {"none", "frame_only", "stamp_compact", "eskd_2_2a"}
-        else "none"
-    )
-    css_class = f"preview-doc preview-frame--{preset}"
+    css_class = f"preview-doc preview-frame--{frame_preset}"
     return f'<div class="{css_class}">{body}</div>'
 
 
@@ -90,6 +85,15 @@ def preview_document(
         template_key, data, template_tz, template_pz
     )
     frame_preset = _frame_preset_from_style(style_profile_text)
+    if frame_preset not in {"none", "frame_only", "stamp_compact", "eskd_2_2a"}:
+        warnings.append(
+            CaseWarning(
+                code="frame_unknown",
+                message=f"Неизвестный frame.preset={frame_preset!r}, использован none",
+                path="frame.preset",
+            )
+        )
+        frame_preset = "none"
     if frame_preset == "eskd_2_2a":
         warnings.append(
             CaseWarning(

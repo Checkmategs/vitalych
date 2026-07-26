@@ -38,6 +38,35 @@ class CasesTest(unittest.TestCase):
         self.assertEqual(len(warnings), 1)
         self.assertEqual(warnings[0].code, "missing_case")
 
+    def test_cased_value_is_string_for_fill_macro(self) -> None:
+        from jinja2 import Environment, BaseLoader
+
+        from src.cases import CasedValue, prepare_render_data
+
+        data, _ = prepare_render_data(
+            {"funding": {"value": "Бюджет проекта", "cases": {"gen": "бюджета проекта"}}}
+        )
+        self.assertIsInstance(data["funding"], CasedValue)
+        self.assertIsInstance(data["funding"], str)
+
+        env = Environment(loader=BaseLoader())
+        tpl = env.from_string(
+            "{% macro fill(value, hint) -%}"
+            "{% if value is defined and value is string and value|trim -%}"
+            "{{ value }}"
+            "{%- else -%}"
+            "_заполнить: {{ hint }}_"
+            "{%- endif %}"
+            "{%- endmacro %}"
+            "{{ fill(funding, 'финансирование') }}"
+        )
+        self.assertEqual(tpl.render(**data).strip(), "Бюджет проекта")
+
+    def test_invalid_cases_type_not_wrapped(self) -> None:
+        from src.cases import is_cased_dict
+
+        self.assertFalse(is_cased_dict({"value": "x", "cases": []}))
+
 
 if __name__ == "__main__":
     unittest.main()
