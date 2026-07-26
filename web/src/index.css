@@ -22,7 +22,10 @@
 
   --left-width: 240px;
   --right-width: 420px;
-  --topbar-height: 44px;
+  --topbar-height: 48px;
+  --mh-danger-bg: #fff5f5;
+  --mh-danger-border: #dd8888;
+  --mh-danger-text: #aa3333;
 }
 
 *,

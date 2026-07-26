@@ -16,6 +16,7 @@ import {
 } from '../schema/fields'
 import { countObjectInstances } from '../schema/objects'
 import { FieldEditModal } from './FieldEditModal'
+import { IconPlus } from './HeaderIcons'
 import { ObjectsSection } from './ObjectsSection'
 import { copyTextToClipboard } from '../utils/clipboard'
 
@@ -34,25 +35,52 @@ function Accordion({
   count,
   icon,
   defaultOpen = true,
+  onAdd,
+  addLabel = 'Добавить',
   children,
 }: {
   title: string
   count: number
   icon?: string
   defaultOpen?: boolean
+  onAdd?: () => void
+  addLabel?: string
   children: ReactNode
 }) {
   const [open, setOpen] = useState(defaultOpen)
   return (
     <div className="accordion">
-      <button type="button" className="accordion-header" onClick={() => setOpen((v) => !v)}>
-        {icon ? <span className="accordion-icon">{icon}</span> : null}
-        <span className="accordion-title">
-          {title} <span className="accordion-count">({count})</span>
-        </span>
-        <span className="accordion-chevron">{open ? '▾' : '▸'}</span>
-      </button>
-      {open ? <div className="accordion-body">{children}</div> : null}
+      <div className="accordion-header">
+        <button
+          type="button"
+          className="accordion-title-btn"
+          onClick={() => setOpen((v) => !v)}
+          aria-expanded={open}
+        >
+          {icon ? <span className="accordion-icon">{icon}</span> : null}
+          <span className="accordion-title">
+            {title} <span className="accordion-count">({count})</span>
+          </span>
+        </button>
+        {onAdd ? (
+          <button
+            type="button"
+            className="accordion-add"
+            aria-label={addLabel}
+            title={addLabel}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (!open) setOpen(true)
+              onAdd()
+            }}
+          >
+            <IconPlus size={14} />
+          </button>
+        ) : null}
+      </div>
+      <div className="accordion-body" hidden={!open}>
+        {children}
+      </div>
     </div>
   )
 }
@@ -195,20 +223,11 @@ function ListFieldCard({
   )
 }
 
-function AddFieldButton({ onClick }: { onClick: () => void }) {
-  return (
-    <button type="button" className="var-add-btn" onClick={onClick} title="Добавить поле" aria-label="Добавить поле">
-      <span className="var-add-btn-plus" aria-hidden>
-        +
-      </span>
-    </button>
-  )
-}
-
 export function VariablesPanel({ data, onChange }: Props) {
   const textFields = textFieldsOf(data)
   const listFields = listFieldsOf(data)
   const [modal, setModal] = useState<ModalState>(null)
+  const [createObjectTypeNonce, setCreateObjectTypeNonce] = useState(0)
 
   const setField = (field: FieldDef, value: unknown) => {
     onChange(setByPath(data, field.path, value) as Record<string, unknown>)
@@ -222,8 +241,13 @@ export function VariablesPanel({ data, onChange }: Props) {
       <div className="panel-title">Переменные</div>
       <div className="variables-panel-scroll">
         <Accordion title="Простые поля" count={textFields.length}>
-          <Accordion title="Текст" count={textFields.length} defaultOpen>
-            <AddFieldButton onClick={() => setModal({ mode: 'create', initialKind: 'text' })} />
+          <Accordion
+            title="Текст"
+            count={textFields.length}
+            defaultOpen
+            addLabel="Добавить текстовое поле"
+            onAdd={() => setModal({ mode: 'create', initialKind: 'text' })}
+          >
             {textFields.map((field) => {
               const raw = getByPath(data, field.path)
               const value = raw == null ? '' : String(raw)
@@ -241,8 +265,13 @@ export function VariablesPanel({ data, onChange }: Props) {
         </Accordion>
 
         <Accordion title="Списки" count={listFields.length}>
-          <Accordion title="Простые списки" count={listFields.length} defaultOpen>
-            <AddFieldButton onClick={() => setModal({ mode: 'create', initialKind: 'list' })} />
+          <Accordion
+            title="Простые списки"
+            count={listFields.length}
+            defaultOpen
+            addLabel="Добавить список"
+            onAdd={() => setModal({ mode: 'create', initialKind: 'list' })}
+          >
             {listFields.map((field) => (
               <ListFieldCard
                 key={field.slug}
@@ -255,8 +284,18 @@ export function VariablesPanel({ data, onChange }: Props) {
           </Accordion>
         </Accordion>
 
-        <Accordion title="Объекты" count={countObjectInstances(data)} defaultOpen={false}>
-          <ObjectsSection data={data} onChange={onChange} />
+        <Accordion
+          title="Объекты"
+          count={countObjectInstances(data)}
+          defaultOpen={false}
+          addLabel="Добавить тип объекта"
+          onAdd={() => setCreateObjectTypeNonce((n) => n + 1)}
+        >
+          <ObjectsSection
+            data={data}
+            onChange={onChange}
+            createTypeNonce={createObjectTypeNonce}
+          />
         </Accordion>
       </div>
 
@@ -265,13 +304,15 @@ export function VariablesPanel({ data, onChange }: Props) {
           mode="create"
           initialKind={modal.initialKind}
           existingSlugs={existingSlugs}
+          data={data}
           onCreate={(def, initialValue) => {
-            const { data: next } = createCustomField(
+            const created = createCustomField(
               data,
               { slug: def.slug, label: def.label, kind: def.kind },
               initialValue,
             )
-            onChange(next)
+            if (!created) return
+            onChange(created.data)
             setModal(null)
           }}
           onClose={() => setModal(null)}
@@ -289,6 +330,7 @@ export function VariablesPanel({ data, onChange }: Props) {
             if (err === 'label') return 'Укажите название'
             if (err === 'slug') return 'Код: латиница, цифры, _, сегменты через точку'
             if (err === 'duplicate') return 'Поле с таким кодом уже есть'
+            if (err === 'conflict') return 'Код пересекается с существующими полями данных'
             const result = updateCustomField(data, modal.field.slug, draft)
             if (!result) return 'Не удалось обновить поле'
             onChange(result.data)

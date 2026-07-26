@@ -287,6 +287,7 @@ export function TemplateEditor({ value, onChange, scrollToHeading, scrollNonce =
         </button>
         <button
           type="button"
+          className="editor-toolbar-btn-wide"
           title="Вставить {{ }}"
           onClick={() => run((v) => wrapSelection(v, '{{ ', ' }}'))}
         >

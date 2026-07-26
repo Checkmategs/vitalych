@@ -494,6 +494,7 @@ function errorMessage(err: ReturnType<typeof validateObjectTypeDraft>): string {
   if (err === 'label') return 'Укажите название'
   if (err === 'key') return 'Код: латиница, цифры, _'
   if (err === 'duplicate') return 'Тип с таким кодом уже есть'
+  if (err === 'conflict') return 'Код занят данными документа (system, parties, …)'
   if (err === 'attrs') return 'Добавьте корректные атрибуты'
   if (err === 'child') return 'Укажите код и название дочернего элемента'
   return 'Ошибка'

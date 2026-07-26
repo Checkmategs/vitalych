@@ -1,6 +1,7 @@
 [Unit]
 Description=Vitalych GOST document generator (API + UI)
-After=network.target
+After=network.target docker.service
+Wants=docker.service
 
 [Service]
 Type=simple
@@ -9,6 +10,7 @@ ExecStart=/opt/vitalych/.venv/bin/uvicorn api.main:app --host 0.0.0.0 --port 808
 Restart=on-failure
 RestartSec=5
 Environment=PYTHONUNBUFFERED=1
+EnvironmentFile=-/opt/vitalych/.env
 
 [Install]
 WantedBy=multi-user.target
